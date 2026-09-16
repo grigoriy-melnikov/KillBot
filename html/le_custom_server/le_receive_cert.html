@@ -1,0 +1,226 @@
+<?php
+/**
+ * Автономный приём wildcard-сертификата на worker-сервере (POST с LE-сервера).
+ * Один файл — без require/include. Залить как le_receive_cert.php в DocumentRoot.
+ *
+ * URL: https://WORKER_IP/le_receive_cert.php?domain=example.com
+ * POST: fullchain, privkey (текст PEM или multipart)
+ *
+ * Сохранение: /opt/killbot/ssl/{domain}/fullchain.pem, privkey.pem
+ */
+
+declare(strict_types=1);
+
+header('Content-Type: application/json; charset=utf-8');
+
+$config = [
+    // IP LE-сервера, с которого разрешена загрузка (можно несколько)
+    'allowed_le_server_ips' => ['45.66.116.213', '31.211.65.236'],
+    'ssl_base_dir' => '/opt/killbot/ssl',
+    'letsencrypt_dir' => '/etc/letsencrypt',
+    // Удалить локальный certbot/LE для домена после успешного приёма центрального серта
+    'remove_local_letsencrypt' => true,
+];
+
+function le_receive_json(int $code, array $body): void
+{
+    http_response_code($code);
+    echo json_encode($body, JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT);
+    exit;
+}
+
+function le_receive_client_ip(): string
+{
+    return $_SERVER['REMOTE_ADDR'] ?? '';
+}
+
+function le_receive_pem_from_request(string $field): string
+{
+    $value = (string)($_POST[$field] ?? '');
+    if ($value === '' && !empty($_FILES[$field]['tmp_name']) && is_uploaded_file($_FILES[$field]['tmp_name'])) {
+        $value = (string)file_get_contents($_FILES[$field]['tmp_name']);
+    }
+
+    if ($value === '') {
+        return '';
+    }
+
+    $value = str_replace("\r\n", "\n", trim($value));
+
+    return le_receive_normalize_pem_armor($value);
+}
+
+/** BEGIN/END: в urlencoded пробелы часто приходят как '+', base64-тело не трогаем */
+function le_receive_normalize_pem_armor(string $pem): string
+{
+    $lines = explode("\n", $pem);
+    foreach ($lines as $i => $line) {
+        if (str_starts_with($line, '-----BEGIN') || str_starts_with($line, '-----END')) {
+            $lines[$i] = str_replace('+', ' ', $line);
+        }
+    }
+
+    return implode("\n", $lines);
+}
+
+function le_receive_looks_like_pem(string $pem): bool
+{
+    $lower = strtolower($pem);
+
+    return str_contains($lower, 'begin') && str_contains($lower, 'end');
+}
+
+function le_receive_looks_like_pem_cert(string $pem): bool
+{
+    return le_receive_looks_like_pem($pem);
+}
+
+function le_receive_looks_like_pem_privkey(string $pem): bool
+{
+    return le_receive_looks_like_pem($pem);
+}
+
+function le_receive_find_certbot(): ?string
+{
+    foreach (['/usr/bin/certbot', '/usr/local/bin/certbot'] as $candidate) {
+        if (is_executable($candidate)) {
+            return $candidate;
+        }
+    }
+
+    return null;
+}
+
+/**
+ * Удаляет локальный certbot-сертификат: certbot delete --cert-name {domain}
+ *
+ * @return array<string, mixed>
+ */
+function le_receive_remove_local_letsencrypt(string $domain, array $config): array
+{
+    if (empty($config['remove_local_letsencrypt'])) {
+        return ['status' => 'skipped', 'message' => 'remove_local_letsencrypt disabled'];
+    }
+
+    $base = rtrim((string)($config['letsencrypt_dir'] ?? '/etc/letsencrypt'), '/');
+    $hasCert = (glob($base . '/live/' . $domain . '*', GLOB_ONLYDIR) ?: []) !== [];
+
+    if (!$hasCert) {
+        return ['status' => 'skipped', 'message' => 'No local certbot certificate for this domain'];
+    }
+
+    $certbot = le_receive_find_certbot();
+    if ($certbot === null) {
+        return ['status' => 'error', 'message' => 'certbot binary not found'];
+    }
+
+    $cmd = sprintf(
+        '%s delete --cert-name %s --non-interactive 2>&1',
+        escapeshellcmd($certbot),
+        escapeshellarg($domain)
+    );
+    $output = [];
+    $exitCode = 1;
+    exec($cmd, $output, $exitCode);
+    $outputText = implode("\n", $output);
+
+    if ($exitCode !== 0) {
+        return [
+            'status' => 'error',
+            'message' => 'certbot delete failed',
+            'exit_code' => $exitCode,
+            'output' => $outputText,
+        ];
+    }
+
+    return [
+        'status' => 'ok',
+        'message' => 'certbot delete completed',
+        'output' => $outputText,
+    ];
+}
+
+if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
+    le_receive_json(405, ['status' => 'error', 'message' => 'Method not allowed, use POST']);
+}
+
+$clientIp = le_receive_client_ip();
+$allowed = $config['allowed_le_server_ips'] ?? [];
+if ($allowed !== [] && !in_array($clientIp, $allowed, true)) {
+    le_receive_json(403, [
+        'status' => 'error',
+        'message' => 'Forbidden: request not from allowed LE server',
+        'client_ip' => $clientIp,
+    ]);
+}
+
+$domain = strtolower(trim((string)($_GET['domain'] ?? $_POST['domain'] ?? '')));
+$domain = rtrim($domain, '.');
+
+if ($domain === '' || !preg_match('/^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$/', $domain)) {
+    le_receive_json(400, ['status' => 'error', 'message' => 'Invalid or missing domain parameter']);
+}
+
+$fullchain = le_receive_pem_from_request('fullchain');
+$privkey = le_receive_pem_from_request('privkey');
+
+if ($fullchain === '' || $privkey === '') {
+    le_receive_json(400, ['status' => 'error', 'message' => 'Missing fullchain or privkey in POST body']);
+}
+
+if (!le_receive_looks_like_pem_cert($fullchain)) {
+    le_receive_json(400, ['status' => 'error', 'message' => 'fullchain does not look like PEM certificate']);
+}
+
+if (!le_receive_looks_like_pem_privkey($privkey)) {
+    le_receive_json(400, ['status' => 'error', 'message' => 'privkey does not look like PEM private key']);
+}
+
+$sslBase = rtrim((string)($config['ssl_base_dir'] ?? '/opt/killbot/ssl'), '/');
+$targetDir = $sslBase . '/' . $domain;
+
+if (!is_dir($targetDir) && !mkdir($targetDir, 0775, true) && !is_dir($targetDir)) {
+    le_receive_json(500, [
+        'status' => 'error',
+        'message' => 'Cannot create directory: ' . $targetDir,
+        'hint' => 'sudo mkdir -p ' . $sslBase . ' && sudo chown www-data:www-data ' . $sslBase . ' && sudo chmod 775 ' . $sslBase,
+    ]);
+}
+
+$fullchainPath = $targetDir . '/fullchain.pem';
+$privkeyPath = $targetDir . '/privkey.pem';
+
+if (file_put_contents($fullchainPath, $fullchain, LOCK_EX) === false) {
+    le_receive_json(500, ['status' => 'error', 'message' => 'Cannot write fullchain.pem']);
+}
+if (file_put_contents($privkeyPath, $privkey, LOCK_EX) === false) {
+    @unlink($fullchainPath);
+    le_receive_json(500, ['status' => 'error', 'message' => 'Cannot write privkey.pem']);
+}
+
+chmod($fullchainPath, 0644);
+chmod($privkeyPath, 0600);
+
+$letsencryptCleanup = null;
+if (!empty($config['remove_local_letsencrypt'])) {
+    $letsencryptCleanup = le_receive_remove_local_letsencrypt($domain, $config);
+}
+
+$response = [
+    'status' => 'ok',
+    'domain' => $domain,
+    'message' => 'Certificate saved',
+    'paths' => [
+        'fullchain' => $fullchainPath,
+        'privkey' => $privkeyPath,
+    ],
+];
+
+if ($letsencryptCleanup !== null) {
+    $response['letsencrypt_cleanup'] = $letsencryptCleanup;
+    if (($letsencryptCleanup['status'] ?? '') === 'ok') {
+        $response['message'] .= '; local certbot certificate removed';
+    }
+}
+
+le_receive_json(200, $response);

@@ -1,0 +1,154 @@
+<?php
+$ips = array();
+
+$cliForwardedFor = (isset($argc)&&$argc > 1) ? $argv[1] : null;
+$cliRemoteAddr = (isset($argc)&&$argc > 2) ? $argv[2] : null;
+$user_agent = (isset($argc)&&$argc > 3) ? $argv[3] : null;
+
+$httpXForwardedFor = isset($_SERVER['HTTP_X_FORWARDED_FOR']) 
+    ? $_SERVER['HTTP_X_FORWARDED_FOR'] 
+    : $cliForwardedFor;
+
+$remoteAddr = isset($_SERVER['REMOTE_ADDR']) 
+    ? $_SERVER['REMOTE_ADDR'] 
+    : $cliRemoteAddr;
+    
+$user_agent = isset($_SERVER['HTTP_USER_AGENT']) 
+    ? $_SERVER['HTTP_USER_AGENT'] 
+    : $user_agent;
+
+if (!empty($httpXForwardedFor)) {
+    $ips = explode(",", $httpXForwardedFor);
+}
+
+$real_remote_addr = !empty($ips[0]) ? $ips[0] : $remoteAddr;
+
+
+?>
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="robots" content="noindex, nofollow">
+    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+    <meta http-equiv="Pragma" content="no-cache">
+    <meta http-equiv="Expires" content="0">
+
+    <title id="pageTitle">Fake Bot [<?=$real_remote_addr?>] [<?=htmlspecialchars($user_agent)?>]...</title>
+    <script>
+        title_ru = "\u0423\u0432\u0435\u0434\u043e\u043c\u043b\u0435\u043d\u0438\u0435...";
+        title_en = "Notice...";
+        title_zh = "\u901a\u77e5...";
+        if (navigator.language.substring(0,2)=="ru"){    
+            title = title_ru;
+        }
+        if (navigator.language.substring(0,2)=="zh"){
+            title = title_zh;
+        }
+        document.getElementById("pageTitle").textContent = title+"[<?=$real_remote_addr?>]";
+    </script>
+    <style>
+        body, html {
+            margin: 0;
+            padding: 0;
+            height: 100%;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            font-family: Arial, sans-serif;
+            background-color: #f5f5f5;
+        }
+
+        .container {
+            text-align: center;
+            padding: 20px;
+            background-color: #fff;
+            box-shadow: 0px 4px 10px rgba(0, 0, 0, 0.1);
+            border-radius: 10px;
+            max-width: 400px;
+            width: 90%;
+        }
+
+        .container p {
+            font-size: 18px;
+            color: #333;
+            margin-bottom: 20px;
+        }
+
+        .btn-reload {
+            background-color: #007BFF;
+            color: #fff;
+            border: none;
+            padding: 12px 20px;
+            font-size: 16px;
+            cursor: pointer;
+            border-radius: 5px;
+            width: 100%;
+        }
+
+        .btn-reload:hover {
+            background-color: #0056b3;
+        }
+
+        @media (max-width: 768px) {
+            .container p {
+                font-size: 16px;
+            }
+
+            .btn-reload {
+                font-size: 14px;
+            }
+        }
+        #ip{
+            font-size: 10px;
+            padding-bottom: 20px;
+        }
+        a#btn-reload {
+            text-decoration: none;
+        }
+    </style>
+</head>
+<body>
+
+    <div class="container">
+    
+        <div id="message"></div>
+        <div id="ip"></div>
+        <a class="btn-reload" id="btn-reload" href="/">Try again</a>
+        <script>
+            Lang = navigator.language.substring(0, 2);
+            
+            message_bot_ru = "\u0414\u043b\u044f \u0432\u0445\u043e\u0434\u0430 \u043d\u0430 \u0441\u0430\u0439\u0442 \u0438\u0437\u043c\u0435\u043d\u0438\u0442\u0435 \u0432\u0430\u0448 User Agent \u043d\u0430 \u0440\u0435\u0430\u043b\u044c\u043d\u044b\u0439. User Agent \u0432\u0430\u0448\u0435\u0433\u043e \u0431\u0440\u0430\u0443\u0437\u0435\u0440\u0430 \u043f\u0440\u0435\u0434\u0441\u0442\u0430\u0432\u043b\u044f\u0435\u0442\u0441\u044f \u0431\u043e\u0442\u043e\u043c \u043f\u043e\u0438\u0441\u043a\u043e\u0432\u043e\u0439 \u0441\u0438\u0441\u0442\u0435\u043c\u044b, \u043f\u043e\u044d\u0442\u043e\u043c\u0443 \u0434\u043e\u0441\u0442\u0443\u043f \u043d\u0430 \u0441\u0430\u0439\u0442 \u043e\u0433\u0440\u0430\u043d\u0438\u0447\u0435\u043d.";
+            message_bot_en = "Access denied: Your User Agent looks like a search bot. Please use a real browser User Agent to continue.";
+            message_bot_zh = "\u8bbf\u95ee\u88ab\u62d2\u7edd\uff1a\u60a8\u7684User Agent\u88ab\u68c0\u6d4b\u4e3a\u641c\u7d22\u5f15\u64ce\u722c\u866b\u3002\u8bf7\u4f7f\u7528\u6b63\u5e38\u6d4f\u89c8\u5668User Agent\u7ee7\u7eed\u8bbf\u95ee\u3002";
+          
+            text_button = "Try again";            
+            text_button_ru = "\u041f\u043e\u043f\u0440\u043e\u0431\u043e\u0432\u0430\u0442\u044c \u0435\u0449\u0451 \u0440\u0430\u0437";            
+            text_button_zh = "\u518d\u6b21\u5c1d\u8bd5"; 
+            
+            ua=navigator.userAgent.toLowerCase();
+            button = text_button;            
+            message = message_bot_en;
+            
+            if (Lang=="ru"){
+                button = text_button_ru;                
+                message = message_bot_ru;                    
+                             
+            }
+            if (Lang=="zh"){
+                button = text_button_zh;
+                message = message_bot_zh;
+            }
+            
+            ua_ip = "<div style='font-size: 10px; word-break: break-all;'>UserAgent=" + ua + "; ip=<?=$real_remote_addr?></div>";
+
+            document.getElementById("message").innerHTML = message;
+            document.getElementById("ip").innerHTML = ua_ip;
+            document.getElementById("btn-reload").innerHTML = button;
+            
+        </script>        
+    </div>
+
+</body>
+</html>

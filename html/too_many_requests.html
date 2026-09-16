@@ -1,0 +1,189 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml">
+  <head>
+    <meta http-equiv="Content-Type" content="text/html; charset=UTF-8" />
+    <meta name="robots" content="noindex, nofollow"/>
+    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate"/>
+    <meta http-equiv="Pragma" content="no-cache"/>
+    <meta http-equiv="Expires" content="0"/>
+    <title>KillBot: слишком много запросов / too many requests</title>
+    <style type="text/css" media="screen">
+      body, html {
+        padding: 3px;
+        background-color: #e4eaf5;
+        font-family: Verdana, sans-serif;
+        font-size: 11pt;
+        text-align: center;
+      }
+      div.main_page {
+        display: table;
+        width: 800px;
+        margin: auto;
+        border: 2px solid #2c3e50;
+        background-color: #ffffff;
+        text-align: center;
+      }
+      div.page_header {
+        height: 99px;
+        background-color: #d6e4f3;
+        display: flex;
+        align-items: center;
+        padding-left: 40px;
+      }
+      div.page_header span {
+        font-size: 180%;
+        font-weight: bold;
+        margin-left: 20px;
+        color: #2c3e50;
+      }
+      div.content_section {
+        margin: 10px;
+        background-color: #ffffff;
+        text-align: left;
+      }
+      div.content_section_text {
+        padding: 12px 16px;
+        font-size: 100%;
+        color: #2c3e50;
+      }
+      div.content_section_text p {
+        margin-bottom: 10px;
+      }
+      div.content_section_text ul {
+        margin: 8px 0 8px 20px;
+        padding-left: 10px;
+      }
+      div.content_section_text li {
+        margin-bottom: 6px;
+      }
+      div.section_header {
+        background-color: #3b5998;
+        color: #ffffff;
+        font-weight: bold;
+        font-size: 112%;
+        text-align: center;
+        padding: 8px;
+        margin-top: 20px;
+      }
+      div.section_header_red {
+        background-color: #1e3f70;
+      }
+      a {
+        font-weight: bold;
+        color: #1e3f70;
+        background-color: #e0e9f7;
+        text-decoration: none;
+        padding: 2px 4px;
+        border-radius: 3px;
+      }
+      a:hover {
+        background-color: #1e3f70;
+        color: #ffffff;
+      }
+      .info-box {
+        text-align: center;
+        margin: 25px 0;
+        padding: 20px;
+        background-color: #f0f5ff;
+        border-radius: 8px;
+        border: 1px dashed #3b5998;
+      }
+      .support-link {
+        display: inline-block;
+        margin-top: 8px;
+        padding: 10px 18px;
+        font-size: 16px;
+      }
+      code {
+        background-color: #eef3fb;
+        padding: 1px 4px;
+        border-radius: 3px;
+        font-size: 95%;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="main_page">
+      <div class="page_header">
+        <img src="https://killbot.ru/sites/default/files/kb_logo.png" alt="KillBot Logo" height="32" />
+        <span>KillBot: Слишком много запросов</span>
+      </div>
+
+      <div class="content_section">
+        <div class="section_header section_header_red">
+          HTTP 429 — слишком много запросов
+        </div>
+        <div class="content_section_text">
+          <p>
+            На сайт идёт слишком много запросов. Система <strong>KillBot</strong> временно ограничила доступ.
+          </p>
+          <p>            
+            Если на вашем сайте более <strong>70&nbsp;000 пользователей в сутки</strong>, вы достигли лимита общего сервера.
+          </p>
+          <p>
+            Если трафик небольшой, то на сайт идёт <strong>DDoS уровня L7</strong>. KillBot ограничивает доступ к сайту,
+             чтобы другие сайты на общем сервере НЕ пострадали.
+          </p>
+          <p><strong>Что делать:</strong></p>
+          <ul>
+            <li>Если у вас много трафика, НЕ используйте общие сервера килбота, а разверните KillBot на своем сервере с увеличенными лимитами (см. ниже)</li>
+            <li>Если у вас НЕ много трафика, то на ваш сайт идет DDoS, можно просто подождать пока атака закончится (или разверните свой VPS с KillBot с увеличенными лимитами).</li>            
+            <li>Свой VPS с KillBot должен быть c защитой от DDoS <strong>L3–L4</strong>, для текущего трафика возьмите не менее <strong>8 CPU, 8&nbsp;ГБ RAM</strong>. Без защиты L3-L4 при ДДоС атаке провайдер просто отключит ваш IP. Cвой сервер рекомендую развернуть VPS на Selectel - там есть L3–L4 защита и VPS очень стабильны.</li>
+          </ul>
+          <p>
+            Далее на своём сервере KillBot <code>/etc/nginx/nginx.conf</code> увеличьте лимиты:
+          </p>
+          <ul>
+            <li><code>limit_req_zone "$host$uri"</code> — с <code>150r/m</code> до <code>4000r/m</code></li>
+            <li><code>limit_req_zone "$host"</code> — с <code>500r/s</code> до <code>2000r/s</code></li>
+          </ul>
+          <p>
+            При DDoS повышайте значения постепенно и следите за загрузкой CPU командой <code>htop</code>.
+          </p>
+          
+            <p>Подробнее: <a class="support-link" href="https://killbot.ru/node/79" target="_blank">https://killbot.ru/node/79</a></p>
+          
+        </div>
+
+        <div class="section_header">
+          HTTP 429 — Too Many Requests
+        </div>
+        <div class="content_section_text">
+          <p>
+            Your site is getting too many requests. <strong>KillBot</strong> has temporarily limited access.
+          </p>
+          <p>
+            If your site has <strong>70,000+ users per day</strong>, you hit the limit of the shared server.
+          </p>
+          <p>
+            If your traffic is small, your site is likely under an <strong>L7 DDoS attack</strong>. KillBot limits requests
+            because this is a shared server — this protects other websites.
+          </p>
+          <p><strong>What to do:</strong></p>
+          <ul>
+            <li>If it is DDoS — wait until the attack slows down.</li>
+            <li>Or deploy your own KillBot VPS: <strong>8 CPU, 8&nbsp;GB RAM</strong> (we recommend Selectel).</li>
+            <li>Make sure the VPS has <strong>L3–L4 DDoS protection</strong>. Without it, your provider may disable your IP during an attack.</li>
+          </ul>
+          <p>
+            On your own server, edit <code>/etc/nginx/nginx.conf</code> and increase limits:
+          </p>
+          <ul>
+            <li><code>limit_req_zone "$host$uri"</code> — from <code>150r/m</code> to <code>4000r/m</code></li>
+            <li><code>limit_req_zone "$host"</code> — from <code>500r/s</code> to <code>2000r/s</code></li>
+          </ul>
+          <p>
+            During DDoS, raise limits step by step and watch CPU load with <code>htop</code>.
+          </p>
+
+          <div class="info-box">
+            <p>More details:</p>
+            <p>
+              <a class="support-link" href="https://killbot.ru/node/79" target="_blank">https://killbot.ru/node/79</a>
+            </p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </body>
+</html>
