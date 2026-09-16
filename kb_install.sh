@@ -24,11 +24,12 @@ KILLBOT_SESSION_LIFETIME=86400 #sec
 
 set -e # Exit immediately if any command fails
 
+KB_GIT_RAW="https://raw.githubusercontent.com/grigoriy-melnikov/KillBot/main"
+
 kb_download() {
   local dest="$1"
-  local url="$2"
-  local mirror="https://r6.sg.kill-bot.net${url#https://data.killbot.ru}"
-  timeout 15 curl --connect-timeout 10 -f -L -o "$dest" "$url" || timeout 15 curl --connect-timeout 10 -f -L -o "$dest" "$mirror"
+  local path="$2"
+  timeout 15 curl --connect-timeout 10 -f -L -o "$dest" "${KB_GIT_RAW}/${path}"
 }
 
 
@@ -1142,7 +1143,7 @@ fi
 
 FILE="/opt/killbot/html/verification.php"
 if [ ! -f "$FILE" ]; then    
-    kb_download "$FILE" "https://data.killbot.ru/verification.html"
+    kb_download "$FILE" "html/verification.html"
     
     if [ $? -eq 0 ]; then
         echo "The verification page has been successfully loaded."
@@ -1159,7 +1160,7 @@ if [ ! -f "$FILE" ]; then
 fi
 
 FILE="/var/www/html/empty.php"
-    kb_download "$FILE" "https://data.killbot.ru/killbot_dns/empty_nginx.html"
+    kb_download "$FILE" "html/empty_nginx.html"
     
     if [ $? -eq 0 ]; then
         echo "The empty php page has been successfully loaded."
@@ -1169,7 +1170,7 @@ FILE="/var/www/html/empty.php"
     fi
 
 FILE="/var/www/html/empty_ru.html"
-    kb_download "$FILE" "https://data.killbot.ru/killbot_dns/empty_ru.html"
+    kb_download "$FILE" "html/empty_ru.html"
     
     if [ $? -eq 0 ]; then
         echo "The empty RU page has been successfully loaded."
@@ -1179,7 +1180,7 @@ FILE="/var/www/html/empty_ru.html"
     fi
 
 FILE="/var/www/html/empty_en.html"
-    kb_download "$FILE" "https://data.killbot.ru/killbot_dns/empty_en.html"
+    kb_download "$FILE" "html/empty_en.html"
     
     if [ $? -eq 0 ]; then
         echo "The empty EN page has been successfully loaded."
@@ -1189,7 +1190,7 @@ FILE="/var/www/html/empty_en.html"
     fi
 
 FILE="/opt/killbot/UpdateAll.sh"
-    kb_download "$FILE" "https://data.killbot.ru/killbot_dns/UpdateAll_nginx.sh"
+    kb_download "$FILE" "sh/UpdateAll_nginx.sh"
     
     if [ $? -eq 0 ]; then
         echo "The UpdateAll.sh file has been successfully loaded."
@@ -1199,7 +1200,7 @@ FILE="/opt/killbot/UpdateAll.sh"
     fi
 
 FILE="/opt/killbot/renew_wildcard.sh"
-    kb_download "$FILE" "https://data.killbot.ru/killbot_dns/renew_wildcard.sh"
+    kb_download "$FILE" "sh/renew_wildcard.sh"
     
     if [ $? -eq 0 ]; then
         echo "The renew_wildcard.sh file has been successfully loaded."
@@ -1209,7 +1210,7 @@ FILE="/opt/killbot/renew_wildcard.sh"
     fi
 
 FILE="/opt/killbot/acme_check_api.sh"
-    kb_download "$FILE" "https://data.killbot.ru/killbot_dns/acme_check_api.sh"
+    kb_download "$FILE" "sh/acme_check_api.sh"
     
     if [ $? -eq 0 ]; then
         echo "The acme_check_api.sh file has been successfully loaded."
@@ -1219,7 +1220,7 @@ FILE="/opt/killbot/acme_check_api.sh"
     fi
 
 FILE="/opt/killbot/official_allowed_ips.sh"
-    kb_download "$FILE" "https://data.killbot.ru/killbot_dns/official_allowed_ips.sh"
+    kb_download "$FILE" "sh/official_allowed_ips.sh"
     
     if [ $? -eq 0 ]; then
         echo "The official_allowed_ips.sh file has been successfully loaded."
@@ -1230,7 +1231,7 @@ FILE="/opt/killbot/official_allowed_ips.sh"
 
 FILE="/opt/killbot/html/FakeBot.php"
 if [ ! -f "$FILE" ]; then
-    kb_download "$FILE" "https://data.killbot.ru/FakeBot.html"
+    kb_download "$FILE" "html/FakeBot.html"
 
     if [ $? -eq 0 ]; then
         echo "FakeBot page loaded."
@@ -1243,7 +1244,7 @@ fi
 
 FILE="/opt/killbot/html/BlockBot.html"
 if [ ! -f "$FILE" ]; then
-    kb_download "$FILE" "https://data.killbot.ru/BlockBot.html"
+    kb_download "$FILE" "html/BlockBot.html"
 
     if [ $? -eq 0 ]; then
         echo "BlockBot page loaded."
@@ -1255,7 +1256,7 @@ fi
 
 FILE="/opt/killbot/html/Expired.html"
 if [ ! -f "$FILE" ]; then
-    kb_download "$FILE" "https://data.killbot.ru/Expired.html"
+    kb_download "$FILE" "html/Expired.html"
 
     if [ $? -eq 0 ]; then
         echo "Expired page loaded."
@@ -1267,7 +1268,7 @@ fi
 
 
 FILE="/opt/killbot/f2b/subnet-monitor.sh"
-    kb_download "$FILE" "https://data.killbot.ru/killbot_dns/subnet-monitor.sh"
+    kb_download "$FILE" "sh/subnet-monitor.sh"
 
     if [ $? -eq 0 ]; then
         echo "subnet-monitor loaded."
@@ -1277,7 +1278,7 @@ FILE="/opt/killbot/f2b/subnet-monitor.sh"
     fi
 
 FILE="/opt/killbot/f2b/unblock_traffic.sh"
-    kb_download "$FILE" "https://data.killbot.ru/killbot_dns/unblock_traffic.sh"
+    kb_download "$FILE" "sh/unblock_traffic.sh"
 
     if [ $? -eq 0 ]; then
         echo "unblock_traffic loaded."
@@ -1288,7 +1289,7 @@ FILE="/opt/killbot/f2b/unblock_traffic.sh"
 
 
 FILE="/opt/killbot/f2b/check_apache_and_block.sh"
-    kb_download "$FILE" "https://data.killbot.ru/killbot_dns/check_apache_and_block.sh"
+    kb_download "$FILE" "sh/check_apache_and_block.sh"
 
     if [ $? -eq 0 ]; then
         echo "check_apache_and_block.sh loaded."
@@ -1298,7 +1299,7 @@ FILE="/opt/killbot/f2b/check_apache_and_block.sh"
     fi
 
 FILE="/opt/killbot/f2b/block_all_countries_except.sh"
-    kb_download "$FILE" "https://data.killbot.ru/killbot_dns/block_all_countries_except.sh"
+    kb_download "$FILE" "sh/block_all_countries_except.sh"
 
     if [ $? -eq 0 ]; then
         echo "block_all_countries_except.sh loaded."
@@ -1308,7 +1309,7 @@ FILE="/opt/killbot/f2b/block_all_countries_except.sh"
     fi
 
 FILE="/opt/killbot/cert_delete.sh"
-    kb_download "$FILE" "https://data.killbot.ru/killbot_dns/cert_delete.sh"
+    kb_download "$FILE" "sh/cert_delete.sh"
 
     if [ $? -eq 0 ]; then
         echo "cert_delete loaded."
@@ -1319,7 +1320,7 @@ FILE="/opt/killbot/cert_delete.sh"
 
 FILE="/opt/killbot/html/access_denied.html"
 if [ ! -f "$FILE" ]; then
-    kb_download "$FILE" "https://data.killbot.ru/access_denied.html"
+    kb_download "$FILE" "html/access_denied.html"
 
     if [ $? -eq 0 ]; then
         echo "access_denied loaded."
@@ -1331,7 +1332,7 @@ fi
 
 FILE="/opt/killbot/html/too_many_requests.html"
 if [ ! -f "$FILE" ]; then
-    kb_download "$FILE" "https://data.killbot.ru/too_many_requests.html"
+    kb_download "$FILE" "html/too_many_requests.html"
 
     if [ $? -eq 0 ]; then
         echo "too_many_requests loaded."
@@ -1342,7 +1343,7 @@ if [ ! -f "$FILE" ]; then
 fi
 
 FILE="/var/www/html/le_receive_cert.php"
-    kb_download "$FILE" "https://data.killbot.ru/killbot_dns/le_custom_server/le_receive_cert.html"
+    kb_download "$FILE" "html/le_custom_server/le_receive_cert.html"
 
     if [ $? -eq 0 ]; then
         echo "le_receive_cert.php loaded."
@@ -1355,7 +1356,7 @@ sudo chown www-data:www-data /var/www/html/le_receive_cert.php
 sudo chmod 644 /var/www/html/le_receive_cert.php
 
 FILE="/opt/killbot/check_killbot_reverse_proxy.sh"
-    kb_download "$FILE" "https://data.killbot.ru/killbot_dns/check_killbot_reverse_proxy.sh"
+    kb_download "$FILE" "sh/check_killbot_reverse_proxy.sh"
     
     if [ $? -eq 0 ]; then
         echo "The check_killbot_reverse_proxy.sh file has been successfully loaded."
@@ -1365,7 +1366,7 @@ FILE="/opt/killbot/check_killbot_reverse_proxy.sh"
     fi
 
 FILE="/opt/killbot/setup_killbot_reverse_proxy.sh"
-    kb_download "$FILE" "https://data.killbot.ru/killbot_dns/setup_killbot_reverse_proxy.sh"
+    kb_download "$FILE" "sh/setup_killbot_reverse_proxy.sh"
     
     if [ $? -eq 0 ]; then
         echo "The setup_killbot_reverse_proxy.sh file has been successfully loaded."
@@ -1375,7 +1376,7 @@ FILE="/opt/killbot/setup_killbot_reverse_proxy.sh"
     fi
 
 FILE="/opt/killbot/update-postrouting.sh"
-    kb_download "$FILE" "https://data.killbot.ru/killbot_dns/update-postrouting.sh"
+    kb_download "$FILE" "sh/update-postrouting.sh"
     
     if [ $? -eq 0 ]; then
         echo "The update-postrouting.sh has been successfully loaded."
@@ -1385,7 +1386,7 @@ FILE="/opt/killbot/update-postrouting.sh"
     fi
 
 FILE="/opt/killbot/update-symmetric-ip.sh"
-    kb_download "$FILE" "https://data.killbot.ru/killbot_dns/update-symmetric-ip.sh"
+    kb_download "$FILE" "sh/update-symmetric-ip.sh"
     
     if [ $? -eq 0 ]; then
         echo "The update-symmetric-ip.sh has been successfully loaded."
@@ -1395,7 +1396,7 @@ FILE="/opt/killbot/update-symmetric-ip.sh"
     fi
 
 FILE="/opt/killbot/check_host_curl.sh"
-    kb_download "$FILE" "https://data.killbot.ru/killbot_dns/check_host_curl.sh"
+    kb_download "$FILE" "sh/check_host_curl.sh"
     
     if [ $? -eq 0 ]; then
         echo "The check_host_curl.sh has been successfully loaded."
@@ -1406,7 +1407,7 @@ FILE="/opt/killbot/check_host_curl.sh"
     
 
 FILE="/opt/killbot/dns_provider_hint.sh"
-    kb_download "$FILE" "https://data.killbot.ru/killbot_dns/dns_provider_hint.sh"
+    kb_download "$FILE" "sh/dns_provider_hint.sh"
     if [ $? -eq 0 ]; then
         echo "The dns_provider_hint.sh file has been successfully loaded."
     else
@@ -3911,14 +3912,13 @@ sudo sudo tee /opt/killbot/update.sh > /dev/null <<EOF
 #!/bin/bash
 kb_download() {
   local dest="\$1"
-  local url="\$2"
-  local mirror="https://r6.sg.kill-bot.net\${url#https://data.killbot.ru}"
-  timeout 15 curl --connect-timeout 10 -f -L -o "\$dest" "\$url" || timeout 15 curl --connect-timeout 10 -f -L -o "\$dest" "\$mirror"
+  local path="\$2"
+  timeout 15 curl --connect-timeout 10 -f -L -o "\$dest" "https://raw.githubusercontent.com/grigoriy-melnikov/KillBot/main/\$path"
 }
 
 FILE="/opt/killbot/html/verification.php"
   
-    kb_download "\$FILE" "https://data.killbot.ru/verification.html"
+    kb_download "\$FILE" "html/verification.html"
     
     if [ \$? -eq 0 ]; then
         echo "The verification page (verification.html) has been successfully loaded."
@@ -3937,7 +3937,7 @@ FILE="/opt/killbot/html/verification.php"
 
 FILE="/opt/killbot/html/FakeBot.php"
 
-    kb_download "\$FILE" "https://data.killbot.ru/FakeBot.html"
+    kb_download "\$FILE" "html/FakeBot.html"
 
     if [ \$? -eq 0 ]; then
         echo "The FakeBot page (FakeBot.php) has been successfully loaded."
@@ -3948,7 +3948,7 @@ FILE="/opt/killbot/html/FakeBot.php"
 
 FILE="/opt/killbot/html/Expired.html"
 
-    kb_download "\$FILE" "https://data.killbot.ru/Expired.html"
+    kb_download "\$FILE" "html/Expired.html"
 
     if [ \$? -eq 0 ]; then
         echo "The Expired page (Expired.html) has been successfully loaded."
@@ -3961,7 +3961,7 @@ sudo chown www-data:www-data /opt/killbot/html/FakeBot.php /opt/killbot/html/ver
 
 FILE="/opt/killbot/cert_wildcard_new.sh"
 
-    kb_download "\$FILE" "https://data.killbot.ru/killbot_dns/cert_wildcard_new.sh"
+    kb_download "\$FILE" "sh/cert_wildcard_new.sh"
 
     if [ \$? -eq 0 ]; then
         echo "The cert_wildcard_new.sh has been successfully loaded."
@@ -3972,7 +3972,7 @@ FILE="/opt/killbot/cert_wildcard_new.sh"
 
 FILE="/opt/killbot/off_killbot_protection.sh"
 
-    kb_download "\$FILE" "https://data.killbot.ru/killbot_dns/off_killbot_protection.sh"
+    kb_download "\$FILE" "sh/off_killbot_protection.sh"
 
     if [ \$? -eq 0 ]; then
         echo "The off_killbot_protection.sh has been successfully loaded."
@@ -3983,7 +3983,7 @@ FILE="/opt/killbot/off_killbot_protection.sh"
 
 FILE="/opt/killbot/on_killbot_protection.sh"
 
-    kb_download "\$FILE" "https://data.killbot.ru/killbot_dns/on_killbot_protection.sh"
+    kb_download "\$FILE" "sh/on_killbot_protection.sh"
 
     if [ \$? -eq 0 ]; then
         echo "The on_killbot_protection.sh has been successfully loaded."
@@ -3994,7 +3994,7 @@ FILE="/opt/killbot/on_killbot_protection.sh"
 
 FILE="/opt/killbot/clean_up_unused_certs.sh"
 
-    kb_download "\$FILE" "https://data.killbot.ru/killbot_dns/clean_up_unused_certs.sh"
+    kb_download "\$FILE" "sh/clean_up_unused_certs.sh"
 
     if [ \$? -eq 0 ]; then
         echo "The clean_up_unused_certs.sh has been successfully loaded."
@@ -4005,7 +4005,7 @@ FILE="/opt/killbot/clean_up_unused_certs.sh"
 
 FILE="/opt/killbot/UpdateAll.sh"
 
-    kb_download "\$FILE" "https://data.killbot.ru/killbot_dns/UpdateAll_nginx.sh"
+    kb_download "\$FILE" "sh/UpdateAll_nginx.sh"
 
     if [ \$? -eq 0 ]; then
         echo "The UpdateAll.sh has been successfully loaded."
@@ -4015,7 +4015,7 @@ FILE="/opt/killbot/UpdateAll.sh"
     fi
 
 FILE="/opt/killbot/renew_wildcard.sh"
-    kb_download "\$FILE" "https://data.killbot.ru/killbot_dns/renew_wildcard.sh"
+    kb_download "\$FILE" "sh/renew_wildcard.sh"
     
     if [ \$? -eq 0 ]; then
         echo "The renew_wildcard.sh file has been successfully loaded."
@@ -4025,7 +4025,7 @@ FILE="/opt/killbot/renew_wildcard.sh"
     fi
 
 FILE="/opt/killbot/acme_check_api.sh"
-    kb_download "\$FILE" "https://data.killbot.ru/killbot_dns/acme_check_api.sh"
+    kb_download "\$FILE" "sh/acme_check_api.sh"
     
     if [ \$? -eq 0 ]; then
         echo "The acme_check_api.sh file has been successfully loaded."
@@ -4035,7 +4035,7 @@ FILE="/opt/killbot/acme_check_api.sh"
     fi
 
 FILE="/opt/killbot/official_allowed_ips.sh"
-    kb_download "\$FILE" "https://data.killbot.ru/killbot_dns/official_allowed_ips.sh"
+    kb_download "\$FILE" "sh/official_allowed_ips.sh"
     
     if [ \$? -eq 0 ]; then
         echo "The official_allowed_ips.sh file has been successfully loaded."
@@ -4045,7 +4045,7 @@ FILE="/opt/killbot/official_allowed_ips.sh"
     fi
 
 FILE="/opt/killbot/cert_delete.sh"
-    kb_download "\$FILE" "https://data.killbot.ru/killbot_dns/cert_delete.sh"
+    kb_download "\$FILE" "sh/cert_delete.sh"
     
     if [ \$? -eq 0 ]; then  cd /
         echo "The cert_delete.sh file has been successfully loaded."
@@ -4055,7 +4055,7 @@ FILE="/opt/killbot/cert_delete.sh"
     fi
 
 FILE="/opt/killbot/html/access_denied.html"
-    kb_download "\$FILE" "https://data.killbot.ru/access_denied.html"
+    kb_download "\$FILE" "html/access_denied.html"
     
     if [ \$? -eq 0 ]; then
         echo "The access_denied.html file has been successfully loaded."
@@ -4065,7 +4065,7 @@ FILE="/opt/killbot/html/access_denied.html"
     fi
 
 FILE="/opt/killbot/html/too_many_requests.html"
-    kb_download "\$FILE" "https://data.killbot.ru/too_many_requests.html"
+    kb_download "\$FILE" "html/too_many_requests.html"
     
     if [ \$? -eq 0 ]; then
         echo "The too_many_requests.html file has been successfully loaded."
@@ -4074,29 +4074,8 @@ FILE="/opt/killbot/html/too_many_requests.html"
         exit 1
     fi
 
-FILE="/root/.acme.sh/dnsapi/dns_nicru.sh"
-    kb_download "\$FILE" "https://data.killbot.ru/killbot_dns/dnsapi/dns_nicru.sh"
-    
-    if [ \$? -eq 0 ]; then
-        echo "The dns_nicru.sh file has been successfully loaded."
-    else
-        echo "Error loading the dns_nicru.sh file."
-        exit 1
-    fi
-
-FILE="/root/.acme.sh/dnsapi/dns_selectel.sh"
-    kb_download "\$FILE" "https://data.killbot.ru/killbot_dns/dnsapi/dns_selectel.sh"
-    
-    if [ \$? -eq 0 ]; then
-        echo "The dns_selectel.sh file has been successfully loaded."
-    else
-        echo "Error loading the dns_selectel.sh file."
-        exit 1
-    fi
-
-
 FILE="/opt/killbot/f2b/subnet-monitor.sh"
-    kb_download "\$FILE" "https://data.killbot.ru/killbot_dns/subnet-monitor.sh"
+    kb_download "\$FILE" "sh/subnet-monitor.sh"
     
     if [ \$? -eq 0 ]; then
         echo "The subnet-monitor.sh file has been successfully loaded."
@@ -4106,7 +4085,7 @@ FILE="/opt/killbot/f2b/subnet-monitor.sh"
     fi
 
 FILE="/opt/killbot/f2b/unblock_traffic.sh"
-    kb_download "\$FILE" "https://data.killbot.ru/killbot_dns/unblock_traffic.sh"
+    kb_download "\$FILE" "sh/unblock_traffic.sh"
     
     if [ \$? -eq 0 ]; then
         echo "The unblock_traffic.sh file has been successfully loaded."
@@ -4117,7 +4096,7 @@ FILE="/opt/killbot/f2b/unblock_traffic.sh"
    
 
 FILE="/opt/killbot/f2b/check_apache_and_block.sh"
-    kb_download "\$FILE" "https://data.killbot.ru/killbot_dns/check_apache_and_block.sh"
+    kb_download "\$FILE" "sh/check_apache_and_block.sh"
     
     if [ \$? -eq 0 ]; then
         echo "The /opt/killbot/f2b/check_apache_and_block.sh file has been successfully loaded."
@@ -4128,7 +4107,7 @@ FILE="/opt/killbot/f2b/check_apache_and_block.sh"
 
 
 FILE="/opt/killbot/f2b/block_all_countries_except.sh"
-    kb_download "\$FILE" "https://data.killbot.ru/killbot_dns/block_all_countries_except.sh"
+    kb_download "\$FILE" "sh/block_all_countries_except.sh"
     
     if [ \$? -eq 0 ]; then
         echo "The block_all_countries_except.sh file has been successfully loaded."
@@ -4138,7 +4117,7 @@ FILE="/opt/killbot/f2b/block_all_countries_except.sh"
     fi
 
 FILE="/var/www/html/le_receive_cert.php"
-    kb_download "\$FILE" "https://data.killbot.ru/killbot_dns/le_custom_server/le_receive_cert.html"
+    kb_download "\$FILE" "html/le_custom_server/le_receive_cert.html"
 
     if [ \$? -eq 0 ]; then
         echo "le_receive_cert.php loaded."
@@ -4151,7 +4130,7 @@ sudo chown www-data:www-data /var/www/html/le_receive_cert.php
 sudo chmod 644 /var/www/html/le_receive_cert.php
 
 FILE="/opt/killbot/check_killbot_reverse_proxy.sh"
-    kb_download "\$FILE" "https://data.killbot.ru/killbot_dns/check_killbot_reverse_proxy.sh"
+    kb_download "\$FILE" "sh/check_killbot_reverse_proxy.sh"
     
     if [ \$? -eq 0 ]; then
         echo "The check_killbot_reverse_proxy.sh file has been successfully loaded."
@@ -4161,7 +4140,7 @@ FILE="/opt/killbot/check_killbot_reverse_proxy.sh"
     fi
 
 FILE="/opt/killbot/setup_killbot_reverse_proxy.sh"
-    kb_download "\$FILE" "https://data.killbot.ru/killbot_dns/setup_killbot_reverse_proxy.sh"
+    kb_download "\$FILE" "sh/setup_killbot_reverse_proxy.sh"
     
     if [ \$? -eq 0 ]; then
         echo "The setup_killbot_reverse_proxy.sh file has been successfully loaded."
@@ -4171,7 +4150,7 @@ FILE="/opt/killbot/setup_killbot_reverse_proxy.sh"
     fi
 
 FILE="/opt/killbot/update-postrouting.sh"
-    kb_download "\$FILE" "https://data.killbot.ru/killbot_dns/update-postrouting.sh"
+    kb_download "\$FILE" "sh/update-postrouting.sh"
     
     if [ \$? -eq 0 ]; then
         echo "The update-postrouting.sh file has been successfully loaded."
@@ -4181,7 +4160,7 @@ FILE="/opt/killbot/update-postrouting.sh"
     fi
 
 FILE="/opt/killbot/update-symmetric-ip.sh"
-    kb_download "\$FILE" "https://data.killbot.ru/killbot_dns/update-symmetric-ip.sh"
+    kb_download "\$FILE" "sh/update-symmetric-ip.sh"
     
     if [ \$? -eq 0 ]; then
         echo "The update-symmetric-ip.sh file has been successfully loaded."
@@ -4191,7 +4170,7 @@ FILE="/opt/killbot/update-symmetric-ip.sh"
     fi
 
 FILE="/opt/killbot/check_host_curl.sh"
-    kb_download "\$FILE" "https://data.killbot.ru/killbot_dns/check_host_curl.sh"
+    kb_download "\$FILE" "sh/check_host_curl.sh"
     
     if [ \$? -eq 0 ]; then
         echo "The check_host_curl.sh file has been successfully loaded."
@@ -4201,7 +4180,7 @@ FILE="/opt/killbot/check_host_curl.sh"
     fi
 
 sudo chmod +x /opt/killbot/check_killbot_reverse_proxy.sh /opt/killbot/setup_killbot_reverse_proxy.sh /opt/killbot/update-postrouting.sh /opt/killbot/update-symmetric-ip.sh /opt/killbot/check_host_curl.sh
-sudo chmod +x /root/.acme.sh/dnsapi/dns_selectel.sh /root/.acme.sh/dnsapi/dns_nicru.sh  /opt/killbot/f2b/subnet-monitor.sh  /opt/killbot/renew_wildcard.sh /opt/killbot/cert_delete.sh /opt/killbot/acme_check_api.sh /opt/killbot/on_killbot_protection.sh /opt/killbot/off_killbot_protection.sh /opt/killbot/official_allowed_ips.sh /opt/killbot/cert_wildcard_new.sh /opt/killbot/clean_up_unused_certs.sh /opt/killbot/UpdateAll.sh
+sudo chmod +x /opt/killbot/f2b/subnet-monitor.sh  /opt/killbot/renew_wildcard.sh /opt/killbot/cert_delete.sh /opt/killbot/acme_check_api.sh /opt/killbot/on_killbot_protection.sh /opt/killbot/off_killbot_protection.sh /opt/killbot/official_allowed_ips.sh /opt/killbot/cert_wildcard_new.sh /opt/killbot/clean_up_unused_certs.sh /opt/killbot/UpdateAll.sh
 sudo chmod +x  /opt/killbot/f2b/block_all_countries_except.sh  /opt/killbot/f2b/check_apache_and_block.sh  /opt/killbot/f2b/unblock_traffic.sh /opt/killbot/official_allowed_ips.sh
 
 EOF
@@ -5117,8 +5096,12 @@ sysctl --system
 /opt/killbot/update.sh
 
 echo ""
-echo "DONE"
+echo "****************************"
+echo "Congratulations! KillBot protection is now installed on this server."
 echo ""
-echo "KillBot installation completed successfully"
+echo "To add a website, open my.kill-bot.net"
+echo "(or killbot.ru if you are in Russia)."
+echo "Add your site, select DNS integration, and use this IP: ${SERVER_IP:-$CURRENT_SERVER_IP}"
+echo "****************************"
 
 
