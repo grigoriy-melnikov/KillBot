@@ -2211,6 +2211,8 @@ configContent="<VirtualHost 127.0.0.1:8443>
     SSLEngine on
     SSLCertificateFile ***SSLCertificateFile***
     SSLCertificateKeyFile ***SSLCertificateKeyFile***
+    
+    AllowEncodedSlashes NoDecode
 
     ErrorLog /var/log/apache2/\$domain.error.log
     CustomLog /var/log/apache2/\$domain.access.log combined
@@ -2340,7 +2342,7 @@ if [[ -n "\$cdn_domain_no_https" ]]; then
     "
 else
     configContent+="        
-            ProxyPass / \$https://\$backend_ip/
+            ProxyPass / \$https://\$backend_ip/ nocanon
             ProxyPassReverse / \$https://\$backend_ip/
     "
 fi
@@ -2576,6 +2578,8 @@ configContent="<VirtualHost 127.0.0.1:8443>
     SSLCertificateFile ***SSLCertificateFile***
     SSLCertificateKeyFile ***SSLCertificateKeyFile***
 
+    AllowEncodedSlashes NoDecode
+
     RewriteEngine on
 
     SetEnvIf X-Forwarded-For \"^([0-9\.]+)\" REAL_REMOTE_ADDR=$1
@@ -2641,7 +2645,7 @@ configContent+="
 
         #RequestHeader set Host "\$main_domain"
 
-        ProxyPass / \$https://\$backend_ip/
+        ProxyPass / \$https://\$backend_ip/ nocanon
         ProxyPassReverse / \$https://\$backend_ip/
 
 
@@ -5099,7 +5103,7 @@ echo ""
 echo "****************************"
 echo "Congratulations! KillBot protection is now installed on this server."
 echo ""
-echo "To add a website, open my.kill-bot.net"
+echo " To protect a website, open my.kill-bot.net"
 echo "(or killbot.ru if you are in Russia)."
 echo "Add your site, select DNS integration, and use this IP: ${SERVER_IP:-$CURRENT_SERVER_IP}"
 echo "****************************"

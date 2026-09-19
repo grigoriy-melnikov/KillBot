@@ -27,7 +27,7 @@ if ($kb_windows_1251) {
     $kb_response_text = "buffer = await response.arrayBuffer();html = new TextDecoder('windows-1251').decode(buffer);";
 }
 
-// kbServers: site killbot_revers_checked -> global -> список по умолчанию
+// kbServers: site -> 2nd-level domain -> global -> список по умолчанию
 $kb_servers_default = [
     'https://10052024.ru',
     'https://r1.kill-bot.ru',
@@ -77,6 +77,18 @@ function kb_normalize_site_domain(?string $host): ?string
     return $host;
 }
 
+function kb_second_level_domain(?string $host): ?string
+{
+    if ($host === null || $host === '') {
+        return null;
+    }
+    $parts = explode('.', $host);
+    if (count($parts) < 3) {
+        return null;
+    }
+    return $parts[count($parts) - 2] . '.' . $parts[count($parts) - 1];
+}
+
 $site_domain = null;
 if (!empty($_SERVER['HTTP_HOST'])) {
     $site_domain = kb_normalize_site_domain($_SERVER['HTTP_HOST']);
@@ -93,9 +105,19 @@ if ($site_domain !== null) {
     if ($from_site !== []) {
         $kb_servers = $from_site;
     } else {
-        $from_global = kb_read_servers_from_checked_file($global_checked_file);
-        if ($from_global !== []) {
-            $kb_servers = $from_global;
+        $parent_domain = kb_second_level_domain($site_domain);
+        $from_parent = [];
+        if ($parent_domain !== null) {
+            $parent_checked_file = "/opt/killbot/settings/{$parent_domain}/killbot_revers_checked";
+            $from_parent = kb_read_servers_from_checked_file($parent_checked_file);
+        }
+        if ($from_parent !== []) {
+            $kb_servers = $from_parent;
+        } else {
+            $from_global = kb_read_servers_from_checked_file($global_checked_file);
+            if ($from_global !== []) {
+                $kb_servers = $from_global;
+            }
         }
     }
 } else {
