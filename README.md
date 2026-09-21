@@ -1,16 +1,16 @@
-# KillBot DNS Shield
+# KillBot DNS Verification page
 
-Install a self-hosted KillBot DNS Shield on a clean **Ubuntu 22.04** server.
+Install a self-hosted KillBot DNS Verification page on a clean **Ubuntu 22.04** server.
 
 KillBot runs as a reverse proxy in front of your website. All incoming traffic reaches the KillBot server first. New visitors complete a lightweight JavaScript verification, and only verified traffic is forwarded to your origin server.
 
-The verification page is designed specifically to detect **human-like behavioral bots**—automation that uses a real browser and closely imitates normal users. Because a client must also execute JavaScript before reaching the protected website, the same shield blocks basic HTTP bots, vulnerability scanners, scrapers, and many application-layer (L7) DDoS tools that cannot run the challenge.
+The verification page is designed specifically to detect **human-like behavioral bots**—automation that uses a real browser and closely imitates normal users. Because a client must also execute JavaScript before reaching the protected website, the same verification page blocks basic HTTP bots, vulnerability scanners, scrapers, and many application-layer (L7) DDoS tools that cannot run the challenge.
 
 This repository contains the installer, verification pages, and server-side maintenance scripts used by a self-hosted KillBot server.
 
 ## When to use it
 
-Use the DNS Shield when you need to stop unwanted traffic **before it reaches or downloads content from your website**, for example to:
+Use the DNS Verification page when you need to stop unwanted traffic **before it reaches or downloads content from your website**, for example to:
 
 - block human-like bots and browser automation;
 - stop simple HTTP bots, scanners, and scrapers;
@@ -19,7 +19,7 @@ Use the DNS Shield when you need to stop unwanted traffic **before it reaches or
 - keep bot traffic out of analytics and advertising funnels;
 - absorb common L7 floods before they reach the origin server.
 
-This is different from KillBot's JavaScript-only integration. A script embedded in a website can identify and analyze a visitor only after the HTML has already been served. The DNS Shield sits in front of the website and can deny access before the origin returns any content.
+This is different from KillBot's JavaScript-only integration. A script embedded in a website can identify and analyze a visitor only after the HTML has already been served. The DNS Verification page sits in front of the website and can deny access before the origin returns any content.
 
 > KillBot provides practical protection against the common L7 attacks that often overwhelm regular websites. It is not a replacement for carrier-grade network protection against very large volumetric DDoS attacks.
 
@@ -29,7 +29,7 @@ This is different from KillBot's JavaScript-only integration. A script embedded 
 Visitor or bot
       |
       v
-Your domain -> KillBot DNS Shield -> Origin website
+Your domain -> KillBot DNS Verification page -> Origin website
                    |
                    +-- JavaScript verification
                    +-- Behavioral bot detection
@@ -74,13 +74,13 @@ Installation may end with `Failed to stop postfix.service: Unit postfix.service 
 ## Connect a website
 
 1. Sign in at [my.kill-bot.net](https://my.kill-bot.net/) or [killbot.ru](https://killbot.ru/) if you are in Russia.
-2. Add your domain and select **DNS integration / KillBot DNS Shield**.
+2. Add your domain and select **DNS integration / KillBot DNS Verification page**.
 3. Enter the origin server IP—the server where the website itself is hosted.
 4. Select your self-hosted KillBot server and enter its public IP.
 5. Save the project settings and follow the displayed SSL and DNS instructions.
 6. Change the domain's `A` record so that it points to the KillBot server.
 
-Remove conflicting `A` records. KillBot currently uses IPv4, so remove `AAAA` records for hostnames protected by the shield unless your particular configuration explicitly supports them.
+Remove conflicting `A` records. KillBot currently uses IPv4, so remove `AAAA` records for hostnames protected by the verification page unless your particular configuration explicitly supports them.
 
 If the website receives callbacks that do not run JavaScript—payment notifications, webhooks, external APIs, monitoring systems, or similar services—allowlist their source IP addresses or User-Agents in the KillBot project settings.
 
@@ -107,7 +107,7 @@ After a major update, open the project in the KillBot dashboard and use **Reload
 
 ## Built-in traffic protection
 
-The self-hosted shield adds two server-side layers in addition to browser verification:
+The self-hosted DNS Verification page adds two server-side layers in addition to browser verification:
 
 - **Subnet monitoring:** `subnet-monitor.sh` analyzes recent access-log traffic and can temporarily block abusive individual IPs, `/24` networks, or `/16` networks with iptables. Thresholds, block duration, mode, and log paths are configurable; a whitelist is supported.
 - **Nginx rate controls:** generated Nginx configuration can limit the total request rate and requests to a single URL. This helps when a distributed botnet attacks one expensive endpoint from many IP addresses.
@@ -205,7 +205,7 @@ For higher availability, a domain can be connected to more than one KillBot serv
 
 - [Deploying KillBot on your own server](https://my.kill-bot.net/node/46)
 - [Self-hosted server configuration and maintenance](https://my.kill-bot.net/node/79)
-- [DNS Shield vs. JavaScript integration](https://my.kill-bot.net/node/38)
+- [DNS Verification page vs. JavaScript integration](https://my.kill-bot.net/node/38)
 - [Using multiple KillBot servers](https://my.kill-bot.net/node/74)
 
 Dashboard: [my.kill-bot.net](https://my.kill-bot.net/) · Russia: [killbot.ru](https://killbot.ru/)
