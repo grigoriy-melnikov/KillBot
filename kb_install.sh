@@ -3179,7 +3179,7 @@ CURRENT_HASH=\$(get_current_hash)
 
 
 
-sudo mkdir /etc/apache2/ssl
+sudo mkdir -p /etc/apache2/ssl
 cd /etc/apache2/ssl
 
 certPath="/etc/apache2/ssl/\$domain_without_www-selfsigned.crt"
@@ -3579,15 +3579,11 @@ if [[ "\$use_sub_domains" == "1" && -n "\$api_env_content" ]]; then
         echo "Created provider file: \$provider_file with content: \$dns_provider"
     fi
     
-    set -euo pipefail
-
     echo "Running DNS API check for \$api_env_file ..."
-    /opt/killbot/acme_check_api.sh "\$api_env_file"
-
-    if [[ \$? -eq 0 ]]; then
-      echo "✅ DNS API check passed, continuing..."
+    if /opt/killbot/acme_check_api.sh "\$api_env_file"; then
+      echo "DNS API check passed, continuing..."
     else
-      echo "❌ DNS API check failed for \$API_ENV"
+      echo "DNS API check failed for \$api_env_file"
       exit 1
     fi
 
@@ -3857,18 +3853,37 @@ fi
 NEW_HASH=\$(get_current_hash)
 
 if [ "\$CURRENT_HASH" != "\$NEW_HASH" ]; then
-	sudo systemctl reload nginx
-	sudo systemctl reload apache2
-
-	sudo systemctl start nginx
-	sudo systemctl start apache2
-        echo "\$(date '+%F %T') install.sh reloaded: \$CURRENT_HASH != \$NEW_HASH" >> /var/log/killbot/install_debug.log
+    echo "Reloading nginx and apache..."
+    if systemctl is-active --quiet nginx; then
+        if ! timeout 15 systemctl reload nginx; then
+            echo "Error: nginx reload failed"
+            exit 1
+        fi
+    else
+        if ! timeout 15 systemctl start nginx; then
+            echo "Error: nginx start failed"
+            exit 1
+        fi
+    fi
+    if systemctl is-active --quiet apache2; then
+        if ! timeout 15 systemctl reload apache2; then
+            echo "Error: apache reload failed"
+            exit 1
+        fi
+    else
+        if ! timeout 15 systemctl start apache2; then
+            echo "Error: apache start failed"
+            exit 1
+        fi
+    fi
+    echo "\$(date '+%F %T') install.sh reloaded: \$CURRENT_HASH != \$NEW_HASH" >> /var/log/killbot/install_debug.log || true
 fi
 
 if [ "\$backend_ip" != "localhost" ]; then
     POSTROUTING_FILE="/opt/killbot/postrouting.txt"
+    touch "\$POSTROUTING_FILE" 2>/dev/null || true
     if ! grep -Fxq "\$backend_ip" "\$POSTROUTING_FILE" 2>/dev/null; then
-        echo "\$backend_ip" >> "\$POSTROUTING_FILE"
+        echo "\$backend_ip" >> "\$POSTROUTING_FILE" || true
         postrouting_log_file="/var/log/killbot/update_postrouting.log"
         nohup /opt/killbot/update-postrouting.sh >> "\$postrouting_log_file" 2>&1 </dev/null &
         echo "OK: update-postrouting started in background (log: \$postrouting_log_file)"
