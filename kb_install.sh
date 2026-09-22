@@ -3167,12 +3167,14 @@ FILE1="/etc/apache2/sites-enabled/\$domain_without_www-killbot.conf"
 FILE2="/etc/apache2/sites-enabled/\$domain_without_www.conf"
 FILE3="/etc/nginx/sites-enabled/\$domain_without_www.conf"
 
-# Compute the current hash
-get_current_hash() {
+get_apache_hash() {
     H1=\$(md5sum "\$FILE1" 2>/dev/null | awk '{print \$1}' || echo "\$FILE1")
     H2=\$(md5sum "\$FILE2" 2>/dev/null | awk '{print \$1}' || echo "\$FILE2")
-    H3=\$(md5sum "\$FILE3" 2>/dev/null | awk '{print \$1}' || echo "\$FILE3")
-    echo "\${H1}\${H2}\${H3}" | md5sum | awk '{print \$1}'
+    echo "\${H1}\${H2}" | md5sum | awk '{print \$1}'
+}
+
+get_nginx_hash() {
+    md5sum "\$FILE3" 2>/dev/null | awk '{print \$1}' || echo "\$FILE3"
 }
 
 # Reload or start a systemd service; retry up to 3 times with a short pause.
@@ -3193,7 +3195,8 @@ kb_systemctl_retry() {
     return 1
 }
 
-CURRENT_HASH=\$(get_current_hash)
+CURRENT_APACHE_HASH=\$(get_apache_hash)
+CURRENT_NGINX_HASH=\$(get_nginx_hash)
 
 
 
@@ -3868,21 +3871,27 @@ else
     exit 1
 fi
 
-NEW_HASH=\$(get_current_hash)
+NEW_APACHE_HASH=\$(get_apache_hash)
+NEW_NGINX_HASH=\$(get_nginx_hash)
 
-if [ "\$CURRENT_HASH" != "\$NEW_HASH" ]; then
-    echo "Reloading nginx and apache..."
-    if systemctl is-active --quiet nginx; then
-        kb_systemctl_retry reload nginx || exit 1
-    else
-        kb_systemctl_retry start nginx || exit 1
-    fi
+if [ "\$CURRENT_APACHE_HASH" != "\$NEW_APACHE_HASH" ]; then
+    echo "Reloading apache..."
     if systemctl is-active --quiet apache2; then
         kb_systemctl_retry reload apache2 || exit 1
     else
         kb_systemctl_retry start apache2 || exit 1
     fi
-    echo "\$(date '+%F %T') install.sh reloaded: \$CURRENT_HASH != \$NEW_HASH" >> /var/log/killbot/install_debug.log || true
+    echo "\$(date '+%F %T') install.sh reloaded apache: \$CURRENT_APACHE_HASH != \$NEW_APACHE_HASH" >> /var/log/killbot/install_debug.log || true
+fi
+
+if [ "\$CURRENT_NGINX_HASH" != "\$NEW_NGINX_HASH" ]; then
+    echo "Reloading nginx..."
+    if systemctl is-active --quiet nginx; then
+        kb_systemctl_retry reload nginx || exit 1
+    else
+        kb_systemctl_retry start nginx || exit 1
+    fi
+    echo "\$(date '+%F %T') install.sh reloaded nginx: \$CURRENT_NGINX_HASH != \$NEW_NGINX_HASH" >> /var/log/killbot/install_debug.log || true
 fi
 
 if [ "\$backend_ip" != "localhost" ]; then
