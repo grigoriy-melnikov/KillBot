@@ -29,9 +29,8 @@ KB_GIT_RAW="https://raw.githubusercontent.com/grigoriy-melnikov/KillBot/main"
 kb_download() {
   local dest="$1"
   local path="$2"
-  timeout 15 curl --connect-timeout 10 -f -L -o "$dest" "${KB_GIT_RAW}/${path}"
+  timeout 15 curl --connect-timeout 10 -f -L -H "Cache-Control: no-cache" -H "Pragma: no-cache" -o "$dest" "${KB_GIT_RAW}/${path}"
 }
-
 
 sudo apt update
 
