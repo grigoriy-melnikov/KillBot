@@ -3175,6 +3175,24 @@ get_current_hash() {
     echo "\${H1}\${H2}\${H3}" | md5sum | awk '{print \$1}'
 }
 
+# Reload or start a systemd service; retry up to 3 times with a short pause.
+kb_systemctl_retry() {
+    local action="\$1"
+    local service="\$2"
+    local attempt
+    for attempt in 1 2 3; do
+        if timeout 15 systemctl "\$action" "\$service"; then
+            return 0
+        fi
+        echo "Warning: \$service \$action failed (attempt \$attempt/3)"
+        if [ "\$attempt" -lt 3 ]; then
+            sleep 2
+        fi
+    done
+    echo "Error: \$service \$action failed"
+    return 1
+}
+
 CURRENT_HASH=\$(get_current_hash)
 
 
@@ -3855,26 +3873,14 @@ NEW_HASH=\$(get_current_hash)
 if [ "\$CURRENT_HASH" != "\$NEW_HASH" ]; then
     echo "Reloading nginx and apache..."
     if systemctl is-active --quiet nginx; then
-        if ! timeout 15 systemctl reload nginx; then
-            echo "Error: nginx reload failed"
-            exit 1
-        fi
+        kb_systemctl_retry reload nginx || exit 1
     else
-        if ! timeout 15 systemctl start nginx; then
-            echo "Error: nginx start failed"
-            exit 1
-        fi
+        kb_systemctl_retry start nginx || exit 1
     fi
     if systemctl is-active --quiet apache2; then
-        if ! timeout 15 systemctl reload apache2; then
-            echo "Error: apache reload failed"
-            exit 1
-        fi
+        kb_systemctl_retry reload apache2 || exit 1
     else
-        if ! timeout 15 systemctl start apache2; then
-            echo "Error: apache start failed"
-            exit 1
-        fi
+        kb_systemctl_retry start apache2 || exit 1
     fi
     echo "\$(date '+%F %T') install.sh reloaded: \$CURRENT_HASH != \$NEW_HASH" >> /var/log/killbot/install_debug.log || true
 fi
