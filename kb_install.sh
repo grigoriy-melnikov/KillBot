@@ -2,6 +2,8 @@
 #yes '' | sudo DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a ./kb_install.sh
 
 export DEBIAN_FRONTEND=noninteractive
+export NEEDRESTART_MODE=a
+export NEEDRESTART_SUSPEND=1
 
 #ServerLimit 64
 MAX_CONNECTIONS=5000
@@ -32,6 +34,19 @@ kb_download() {
   timeout 15 curl --connect-timeout 10 -f -L -H "Cache-Control: no-cache" -H "Pragma: no-cache" -o "$dest" "${KB_GIT_RAW}/${path}"
 }
 
+# sudo resets the environment, so NEEDRESTART_* from the launch command never
+# reaches apt. The "Pending kernel upgrade" whiptail then hangs on `yes '' |`.
+sudo() {
+    command sudo DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a NEEDRESTART_SUSPEND=1 "$@"
+}
+
+sudo mkdir -p /etc/needrestart/conf.d
+sudo tee /etc/needrestart/conf.d/zzz-killbot.conf > /dev/null <<'NREOF'
+$nrconf{restart} = 'a';
+$nrconf{kernelhints} = 0;
+$nrconf{ucodehints} = 0;
+NREOF
+
 sudo apt update
 
 rm -rf /var/log/apache2/*
@@ -49,7 +64,7 @@ if [ -f /opt/killbot/f2b/unblock_traffic.sh ]; then
   bash /opt/killbot/f2b/unblock_traffic.sh || true
 fi
 
-sudo apt install needrestart
+sudo apt install -y needrestart
 
 # Path to the configuration file
 CONFIG_FILE="/etc/needrestart/needrestart.conf"
