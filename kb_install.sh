@@ -2705,6 +2705,7 @@ check_apache_config() {
     apache2ctl configtest > /dev/null 2>&1
     if [ \$? -ne 0 ]; then
         echo "Apache configuration test failed."
+        apache2ctl configtest
         exit 1
     fi
     
@@ -2712,6 +2713,7 @@ check_apache_config() {
     nginx -t > /dev/null 2>&1
     if [ \$? -ne 0 ]; then
         echo "Nginx configuration test failed."
+        nginx -t
         exit 1
     fi
 }
@@ -2975,8 +2977,16 @@ remove_domain() {
     disable_domain_sites "\$domain"
     purge_reverse_proxy_nginx "\$domain"
 
-    if command -v certbot >/dev/null 2>&1; then
-        certbot delete --cert-name "\$domain" --non-interactive 2>/dev/null || true
+    if [ -x "\$KILLBOT_CERT_DELETE_SCRIPT" ]; then
+        "\$KILLBOT_CERT_DELETE_SCRIPT" "\$domain" do_not_reload || true
+    else
+        if command -v certbot >/dev/null 2>&1; then
+            certbot delete --cert-name "\$domain" --non-interactive 2>/dev/null || true
+        fi
+        if [ -d "/opt/killbot/ssl/\${domain}" ]; then
+            rm -rf "/opt/killbot/ssl/\${domain}"
+            echo "Removed: /opt/killbot/ssl/\${domain}"
+        fi
     fi
 
     if [ -d "\${SETTINGS_DIR}/\${domain}" ]; then
@@ -3003,6 +3013,137 @@ remove_domain() {
     fi
 
     echo "Domain \$domain removed."
+}
+
+status() {
+    local failed=0
+    local f apache_out nginx_out http_code server_ip
+
+    for f in kb.php empty.php le_receive_cert.php empty_en.html empty_ru.html; do
+        if [ ! -f "/var/www/html/\$f" ]; then
+            echo "Error: missing file /var/www/html/\$f"
+            failed=1
+        fi
+    done
+
+    if [ ! -f "\$KILLBOT_INSTALL_SCRIPT" ]; then
+        echo "Error: missing file \$KILLBOT_INSTALL_SCRIPT"
+        failed=1
+    fi
+
+    apache_out=\$(apache2ctl configtest 2>&1)
+    if echo "\$apache_out" | grep -q "Syntax OK"; then
+        echo "Apache configuration is correct."
+    else
+        echo "Error: Apache configuration is invalid:"
+        echo "\$apache_out"
+        failed=1
+    fi
+
+    nginx_out=\$(nginx -t 2>&1)
+    if echo "\$nginx_out" | grep -q "test is successful"; then
+        echo "Nginx configuration is correct."
+    else
+        echo "Error: Nginx configuration is invalid:"
+        echo "\$nginx_out"
+        failed=1
+    fi
+
+    if systemctl is-active --quiet apache2; then
+        echo "apache2 is running."
+    else
+        echo "Error: apache2 is not running."
+        failed=1
+    fi
+
+    if systemctl is-active --quiet nginx; then
+        echo "nginx is running."
+    else
+        echo "Error: nginx is not running."
+        failed=1
+    fi
+
+    server_ip=\$(curl -s --connect-timeout 10 http://checkip.amazonaws.com)
+    if [ -z "\$server_ip" ]; then
+        echo "Error: could not determine the server IP."
+        failed=1
+    else
+        http_code=\$(curl -s -o /dev/null -w "%{http_code}" --connect-timeout 10 "http://\${server_ip}/kb.php")
+        if [ "\$http_code" = "200" ]; then
+            echo "http://\${server_ip}/kb.php returned 200."
+        else
+            echo "Error: http://\${server_ip}/kb.php returned \${http_code:-no response} (expected 200)."
+            failed=1
+        fi
+    fi
+
+    if [ "\$failed" -eq 0 ]; then
+        echo "KillBot is installed correctly."
+        return 0
+    fi
+    return 1
+}
+
+start() {
+    local failed=0
+    local f apache_out nginx_out
+
+    for f in kb.php empty.php le_receive_cert.php empty_en.html empty_ru.html; do
+        if [ ! -f "/var/www/html/\$f" ]; then
+            echo "Error: missing file /var/www/html/\$f"
+            failed=1
+        fi
+    done
+
+    apache_out=\$(apache2ctl configtest 2>&1)
+    if echo "\$apache_out" | grep -q "Syntax OK"; then
+        echo "Apache configuration is correct."
+    else
+        echo "Error: Apache configuration is invalid:"
+        echo "\$apache_out"
+        failed=1
+    fi
+
+    nginx_out=\$(nginx -t 2>&1)
+    if echo "\$nginx_out" | grep -q "test is successful"; then
+        echo "Nginx configuration is correct."
+    else
+        echo "Error: Nginx configuration is invalid:"
+        echo "\$nginx_out"
+        failed=1
+    fi
+
+    if [ "\$failed" -ne 0 ]; then
+        return 1
+    fi
+
+    if ! systemctl start apache2; then
+        echo "Error: failed to start apache2."
+        return 1
+    fi
+    if ! systemctl start nginx; then
+        echo "Error: failed to start nginx."
+        return 1
+    fi
+
+    echo "apache2 is started."
+    echo "nginx is started."
+    status
+}
+
+stop() {
+    if ! systemctl stop apache2; then
+        echo "Error: failed to stop apache2."
+        return 1
+    fi
+    if ! systemctl stop nginx; then
+        echo "Error: failed to stop nginx."
+        return 1
+    fi
+
+    echo "apache2 is stopped."
+    echo "nginx is stopped."
+    return 0
 }
 
 # Command handling
@@ -3046,17 +3187,26 @@ case "\$1" in
         fi
         remove_domain "\$2"
         ;;
+    status|check)
+        status
+        ;;
+    start)
+        start
+        ;;
+    stop)
+        stop
+        ;;
     install)
         
         install "\$2" "\$3" "\$4" "\$5" "\$6" "\$7" "\$8" "\$9" "\${10}" "\${11}" "\${12}" "\${13}" "\${14}" "\${15}" "\${16}" "\${17}" "\${18}" "\${19}" "\${20}" "\${21}" "\${22}" "\${23}" "\${24}" "\${25}" "\${26}" "\${27}" "\${28}" "\${29}" "\${30}"
         ;;
     *)
-        echo "Usage: kb {ensite|dissite|a2dissite|cert_del|remove|install|reload} domain"
+        echo "Usage: kb {ensite|dissite|a2dissite|cert_del|remove|install|reload|status|check|start|stop} [domain]"
         exit 1
         ;;
 esac
 
-exit 0
+exit \$?
 EOF
 
 sudo chmod +x /etc/init.d/kb
@@ -4629,8 +4779,7 @@ sudo systemctl daemon-reload
 
 sudo tee /var/www/html/kb.php > /dev/null <<EOF
 <?php
-\$allowedIps = [
-    '37.140.192.59',
+\$allowedIps = [    
     '45.66.116.213',
     '45.157.160.212'
 ];
@@ -5142,6 +5291,11 @@ sysctl --system
 /opt/killbot/update-symmetric-ip.sh
 
 /opt/killbot/update.sh
+
+if ! kb status; then
+    echo "Error: KillBot installation check failed."
+    exit 1
+fi
 
 echo ""
 echo "****************************"

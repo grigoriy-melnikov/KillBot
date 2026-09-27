@@ -40,20 +40,6 @@ done
 
 SSL_DIR="/opt/killbot/ssl/${DOMAIN}"
 
-# Delete the certificate without a prompt
-certbot delete --cert-name "$DOMAIN" --non-interactive
-
-if [[ "$SKIP_SSL_PATH" -eq 0 ]]; then
-    if [[ -n "$DOMAIN" && "$DOMAIN" != *"/"* && "$DOMAIN" != *".."* ]]; then
-        if [[ -d "$SSL_DIR" ]]; then
-            rm -rf "$SSL_DIR"
-            echo "Removed: $SSL_DIR"
-        fi
-    fi
-else
-    echo "Skip remove SSL path: $SSL_DIR"
-fi
-
 sudo rm -f "/etc/nginx/sites-enabled/$DOMAIN.conf"
 sudo rm -f "/etc/nginx/sites-enabled/000-r1.$DOMAIN.conf"
 sudo rm -f "/etc/nginx/sites-enabled/000-r2.$DOMAIN.conf"
@@ -74,6 +60,20 @@ a2dissite "$DOMAIN"
 a2dissite "$DOMAIN-killbot"
 sudo rm -f "/etc/apache2/sites-available/$DOMAIN.conf"
 sudo rm -f "/etc/apache2/sites-available/$DOMAIN-killbot.conf"
+
+# Delete the certificate without a prompt
+certbot delete --cert-name "$DOMAIN" --non-interactive
+
+if [[ "$SKIP_SSL_PATH" -eq 0 ]]; then
+    if [[ -n "$DOMAIN" && "$DOMAIN" != *"/"* && "$DOMAIN" != *".."* ]]; then
+        if [[ -d "$SSL_DIR" ]]; then
+            rm -rf "$SSL_DIR"
+            echo "Removed: $SSL_DIR"
+        fi
+    fi
+else
+    echo "Skip remove SSL path: $SSL_DIR"
+fi
 
 if [[ "$SKIP_RELOAD" -eq 1 ]]; then
   echo "Skip reload apache2/nginx (batch mode)"
