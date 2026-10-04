@@ -759,6 +759,7 @@ var kbCutCounterIsBot="1";
 var kbMetrikaDisableForBots="0";  
 var kbCookieName="kbCheck";
 var kbDisableSpinner=false;
+var kbDisplayErrors=false;
 var kbYandexMetrikaInit=false;
 var kbVKPixel="";
 var kbBackupServers=[];
@@ -1121,7 +1122,7 @@ function kbShowSpinner(textType) {
             kbTimerElement.textContent = kbElapsed.toFixed(2) + 's';
         }
         if (kbElapsed > longTimeThreshold) {
-            if (errorContainer && !errorContainer.innerHTML) {
+            if (kbDisplayErrors && errorContainer && !errorContainer.innerHTML) {
                 errorContainer.innerHTML = kbGetVerificationText(longTimeKey);
                 }                     
             }
