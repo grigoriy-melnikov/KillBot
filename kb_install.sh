@@ -1418,6 +1418,16 @@ FILE="/opt/killbot/check_host_curl.sh"
         echo "Error loading the check_host_curl.sh."
         exit 1
     fi
+
+FILE="/opt/killbot/read_apache_log.sh"
+    kb_download "$FILE" "sh/read_apache_log.sh"
+
+    if [ $? -eq 0 ]; then
+        echo "The read_apache_log.sh has been successfully loaded."
+    else
+        echo "Error loading the read_apache_log.sh."
+        exit 1
+    fi
     
 
 FILE="/opt/killbot/dns_provider_hint.sh"
@@ -1429,7 +1439,7 @@ FILE="/opt/killbot/dns_provider_hint.sh"
         exit 1
     fi
 
-sudo chmod +x /opt/killbot/check_killbot_reverse_proxy.sh /opt/killbot/setup_killbot_reverse_proxy.sh /opt/killbot/update-postrouting.sh /opt/killbot/update-symmetric-ip.sh /opt/killbot/check_host_curl.sh
+sudo chmod +x /opt/killbot/check_killbot_reverse_proxy.sh /opt/killbot/setup_killbot_reverse_proxy.sh /opt/killbot/update-postrouting.sh /opt/killbot/update-symmetric-ip.sh /opt/killbot/check_host_curl.sh /opt/killbot/read_apache_log.sh
 sudo chmod 644 /opt/killbot/dns_provider_hint.sh
 
 sudo chown www-data:www-data /opt/killbot/html/FakeBot.php /opt/killbot/html/BlockBot.html /opt/killbot/html/Expired.html /opt/killbot/html/verification.php
@@ -4103,6 +4113,13 @@ if sudo grep -Fxq "$RULE" "$SUDOERS_FILE"; then
 else    
     echo "$RULE" | sudo tee -a "$SUDOERS_FILE" > /dev/null    
 fi
+RULE="www-data ALL=(ALL) NOPASSWD: /opt/killbot/read_apache_log.sh"
+SUDOERS_FILE="/etc/sudoers"
+if sudo grep -Fxq "$RULE" "$SUDOERS_FILE"; then
+    :
+else    
+    echo "$RULE" | sudo tee -a "$SUDOERS_FILE" > /dev/null    
+fi
 
 
 
@@ -4377,7 +4394,17 @@ FILE="/opt/killbot/check_host_curl.sh"
         exit 1
     fi
 
-sudo chmod +x /opt/killbot/check_killbot_reverse_proxy.sh /opt/killbot/setup_killbot_reverse_proxy.sh /opt/killbot/update-postrouting.sh /opt/killbot/update-symmetric-ip.sh /opt/killbot/check_host_curl.sh
+FILE="/opt/killbot/read_apache_log.sh"
+    kb_download "\$FILE" "sh/read_apache_log.sh"
+
+    if [ \$? -eq 0 ]; then
+        echo "The read_apache_log.sh file has been successfully loaded."
+    else
+        echo "Error loading the read_apache_log.sh file."
+        exit 1
+    fi
+
+sudo chmod +x /opt/killbot/check_killbot_reverse_proxy.sh /opt/killbot/setup_killbot_reverse_proxy.sh /opt/killbot/update-postrouting.sh /opt/killbot/update-symmetric-ip.sh /opt/killbot/check_host_curl.sh /opt/killbot/read_apache_log.sh
 sudo chmod +x /opt/killbot/f2b/subnet-monitor.sh  /opt/killbot/renew_wildcard.sh /opt/killbot/cert_delete.sh /opt/killbot/acme_check_api.sh /opt/killbot/on_killbot_protection.sh /opt/killbot/off_killbot_protection.sh /opt/killbot/official_allowed_ips.sh /opt/killbot/cert_wildcard_new.sh /opt/killbot/clean_up_unused_certs.sh /opt/killbot/UpdateAll.sh
 sudo chmod +x  /opt/killbot/f2b/block_all_countries_except.sh  /opt/killbot/f2b/check_apache_and_block.sh  /opt/killbot/f2b/unblock_traffic.sh /opt/killbot/official_allowed_ips.sh
 
@@ -4690,7 +4717,7 @@ if [ ! -f "$ROTATE_CONF" ]; then
     cat <<EOF | sudo tee "$ROTATE_CONF"
 /var/log/apache2/*.log {
     daily                      # Rotate logs daily
-    size 20M
+    size 100M
     missingok                 # Don't fail if log is missing
     rotate 3                  # Keep only 3 days of logs
     compress                  # Compress rotated logs
@@ -4717,7 +4744,7 @@ else
     if grep -q "size" "$ROTATE_CONF"; then
         sudo sed -i 's/^\(\s*size\s*\)[0-9]\+[kKmMgG]\?/\120M/' "$ROTATE_CONF"
     else
-        sudo sed -i '/daily/a \    size 20M' "$ROTATE_CONF"
+        sudo sed -i '/daily/a \    size 100M' "$ROTATE_CONF"
     fi
     
     # Ensure compression is enabled
@@ -4733,7 +4760,7 @@ if [ ! -f "$NGINX_ROTATE_CONF" ]; then
     cat <<EOF | sudo tee "$NGINX_ROTATE_CONF"
 /var/log/nginx/*.log /var/log/apache2/access-nginx.log {
     daily
-    size 20M
+    size 100M
     missingok
     rotate 3
     compress
@@ -4760,7 +4787,7 @@ else
     if grep -q "^[[:space:]]*size[[:space:]]" "$NGINX_ROTATE_CONF"; then
         sudo sed -i 's/^\([[:space:]]*size[[:space:]]*\)[0-9]\+[kKmMgG]\?/\120M/' "$NGINX_ROTATE_CONF"
     else
-        sudo sed -i '/daily/a \    size 20M' "$NGINX_ROTATE_CONF"
+        sudo sed -i '/daily/a \    size 100M' "$NGINX_ROTATE_CONF"
     fi
 fi
 
@@ -5024,18 +5051,24 @@ if (empty(\$dns_bots_allowed)){
 
 if (\$type == "log_download" || \$type == "log_download_error"){
 
-    \$log_file = '/var/log/apache2/' . \$domain_no_www . '.access.log';
-
-    if (\$type == "log_download_error") \$log_file = '/var/log/apache2/' . \$domain_no_www . '.error.log';
-    
-    // Check whether the file exists
-    if (!file_exists(\$log_file)) {
-        die("Log file not found: " . \$log_file);
+    if (!\$domain_no_www) {
+        die("no domain arg");
     }
-    
-    // Check whether the file is readable
-    if (!is_readable(\$log_file)) {
-        die("No permission to read file: " . \$log_file);
+    if (!preg_match('/^[A-Za-z0-9]([A-Za-z0-9.-]*[A-Za-z0-9])?\$/', \$domain_no_www) || strpos(\$domain_no_www, '..') !== false) {
+        die("Invalid domain");
+    }
+
+    \$kind = (\$type == "log_download_error") ? "error" : "access";
+    \$log_file = '/var/log/apache2/' . \$domain_no_www . '.' . \$kind . '.log';
+
+    \$size_cmd = sprintf(
+        'sudo /opt/killbot/read_apache_log.sh %s %s check 2>/dev/null',
+        escapeshellarg(\$domain_no_www),
+        escapeshellarg(\$kind)
+    );
+    \$size = trim((string) shell_exec(\$size_cmd));
+    if (\$size === '' || !ctype_digit(\$size)) {
+        die("Log file not found: " . \$log_file);
     }
     
     // Build the download file name
@@ -5045,13 +5078,17 @@ if (\$type == "log_download" || \$type == "log_download_error"){
     header('Content-Description: File Transfer');
     header('Content-Type: text/plain');
     header('Content-Disposition: attachment; filename="' . \$download_name . '"');
-    header('Content-Length: ' . filesize(\$log_file));
+    header('Content-Length: ' . \$size);
     header('Cache-Control: no-cache, must-revalidate');
     header('Pragma: no-cache');
     header('Expires: 0');
     
-    // Send the file
-    readfile(\$log_file);
+    \$cat_cmd = sprintf(
+        'sudo /opt/killbot/read_apache_log.sh %s %s',
+        escapeshellarg(\$domain_no_www),
+        escapeshellarg(\$kind)
+    );
+    passthru(\$cat_cmd);
     exit;
 }
 

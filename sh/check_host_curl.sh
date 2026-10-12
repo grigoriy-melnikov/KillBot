@@ -88,6 +88,11 @@ else
   SOURCE_IP_LABEL="${SOURCE_IP:-auto}"
 fi
 
+X_REAL_IP="$SOURCE_IP"
+if [ -z "$X_REAL_IP" ]; then
+    X_REAL_IP=$(ip -4 -o addr show scope global 2>/dev/null | awk '{print $4}' | cut -d/ -f1 | head -1)
+fi
+
 cleanup() {
     local dport
     if [ "$RULES_ADDED" -eq 1 ]; then
@@ -187,6 +192,7 @@ run_curl() {
         --max-time 25
         -A "$BROWSER_UA"
         -H "Host: ${HOST}"
+        -H "X-Real-IP: ${X_REAL_IP}"
         -H "Accept: ${BROWSER_ACCEPT}"
         -H "Accept-Language: ${BROWSER_LANG}"
         -H 'Cache-Control: max-age=0'
