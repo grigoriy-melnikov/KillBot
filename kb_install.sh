@@ -5234,6 +5234,8 @@ echo "# Clean unuser certs for KillBot
 */20 * * * * root /usr/sbin/logrotate -s /var/lib/logrotate-nginx-20min.status /etc/logrotate.d/nginx
 0 2 * * 0 root rm -rf /var/log/killbot/*
 * * * * * root /opt/killbot/check_killbot_reverse_proxy.sh >> /var/log/killbot/check_killbot_reverse_proxy.log 2>&1
+# Reload nginx/apache after Let's Encrypt cert files are replaced on the LE server
+15 3 * * 3,6 root /etc/init.d/kb reload >> /var/log/killbot/kb-reload.log 2>&1
 " | sudo tee "$CRON_FILE" > /dev/null
 
 # flush iptables if any subnets were blocked
