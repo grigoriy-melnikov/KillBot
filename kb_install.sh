@@ -4858,7 +4858,7 @@ if (!\$type) {
 }
 
 if (\$type=="v"){
-    echo "3.3"; 
+    echo "3.4"; 
     exit;
 }
 

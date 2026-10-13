@@ -62,7 +62,7 @@ Run these commands on the clean Ubuntu 22.04 server:
 ```bash
 sudo apt update
 sudo apt-get install -y wget
-wget -O kbi.sh https://raw.githubusercontent.com/grigoriy-melnikov/KillBot/main/kb_install.sh
+wget -O kbi.sh https://github.com/grigoriy-melnikov/KillBot/releases/latest/download/kb_install.sh
 chmod +x kbi.sh
 yes '' | sudo DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a ./kbi.sh
 ```
