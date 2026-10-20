@@ -411,6 +411,29 @@ ensure_site_wildcard_ssl() {
     return 1
 }
 
+restore_site_killbot_revers() {
+    local domain="$1"
+    local setup="${SETUP_KILLBOT_REVERSE_PROXY:-/opt/killbot/setup_killbot_reverse_proxy.sh}"
+    local log_file safe
+
+    if [[ ! -x "$setup" ]]; then
+        echo "ERROR: ${setup} not found, cannot restore killbot_revers for ${domain}" >&2
+        return 1
+    fi
+
+    if pgrep -f "[s]etup_killbot_reverse_proxy.sh.*${domain}" >/dev/null 2>&1; then
+        echo "=== ${domain} — setup_killbot_reverse_proxy already running, skip ==="
+        return 0
+    fi
+
+    safe="$(echo "$domain" | sed 's/[^a-zA-Z0-9._-]/_/g')"
+    log_file="/var/log/killbot/setup_killbot_reverse_proxy_${safe}.log"
+    mkdir -p /var/log/killbot
+    echo "=== ${domain} — killbot_revers missing, restoring via setup_killbot_reverse_proxy.sh ==="
+    nohup "$setup" "$domain" -y >> "$log_file" 2>&1 </dev/null &
+    echo "OK: setup_killbot_reverse_proxy started in background (log: ${log_file})"
+}
+
 site_revers_has_proxy_backend_pairs() {
     local revers_file="$1" line has=0
     [[ -s "$revers_file" ]] || return 1
@@ -436,10 +459,15 @@ check_site_revers() {
         return 0
     fi
 
-    [[ -f "$revers_file" && -s "$revers_file" ]] || return 0
-
-    if ! site_revers_has_proxy_backend_pairs "$revers_file"; then
-        echo "=== ${site_domain} — skip (killbot_revers has no proxy:backend lines) ==="
+    if [[ -f "$revers_file" && -s "$revers_file" ]] && site_revers_has_proxy_backend_pairs "$revers_file"; then
+        :
+    elif [[ ! -f "$revers_file" || ! -s "$revers_file" ]] && [[ -f "$checked_file" ]]; then
+        restore_site_killbot_revers "$site_domain"
+        return 0
+    else
+        if [[ -f "$revers_file" ]] && ! site_revers_has_proxy_backend_pairs "$revers_file"; then
+            echo "=== ${site_domain} — skip (killbot_revers has no proxy:backend lines) ==="
+        fi
         return 0
     fi
 

@@ -55,6 +55,8 @@ function kb_read_servers_from_checked_file(string $path): array
         }
         if (preg_match('#^https?://#i', $line)) {
             $urls[] = rtrim($line, '/');
+        } elseif (str_starts_with($line, '/')) {
+            $urls[] = ($line === '/') ? '/' : rtrim($line, '/');
         }
     }
     return array_values(array_unique($urls));
@@ -763,6 +765,8 @@ var kbDisplayErrors=false;
 var kbYandexMetrikaInit=false;
 var kbVKPixel="";
 var kbBackupServers=[];
+var kbDefaultServer="https://data.killbot.ru";
+var kbTriedDefaultServer=false;
 if (typeof kbServerURL === 'undefined') {
 var kbServerURL="";
 }
@@ -832,16 +836,38 @@ function kbBeforeFinish(isBot,kbRes=null){
     }
 }
 
+function kbResolveServerUrl(entry) {
+    if (!entry) return entry;
+    entry = String(entry).trim();
+    if (entry.charAt(0) === '/') {
+        var origin = (location.protocol + '//' + location.host).replace(/\/+$/, '');
+        if (entry === '/') {
+            return origin;
+        }
+        return origin + entry;
+    }
+    return entry.replace(/\/+$/, '');
+}
+
+function kbResolveServerList(servers) {
+    if (!servers || !servers.length) return [];
+    var out = [];
+    for (var i = 0; i < servers.length; i++) {
+        var url = kbResolveServerUrl(servers[i]);
+        if (url) out.push(url);
+    }
+    return out;
+}
+
 function kbGetFastestServer(servers) {
   const controllers = [];
 
   return new Promise(resolve => {
     let resolved = false;
-    const fallbackUrl = "https://data.killbot.ru";
     let pending = (servers && servers.length) ? servers.length : 0;
 
     if (!pending) {
-      resolve(fallbackUrl);
+      resolve(kbDefaultServer);
       return;
     }
 
@@ -869,14 +895,14 @@ function kbGetFastestServer(servers) {
           pending--;
           if (!resolved && pending <= 0) {
             resolved = true;
-            resolve(fallbackUrl);
+            resolve(kbDefaultServer);
           }
         });
     });
 
     // fallback
     setTimeout(() => {
-      if (!resolved) resolve(fallbackUrl);
+      if (!resolved) resolve(kbDefaultServer);
     }, 6050);
   });
 }
@@ -973,12 +999,23 @@ function kbGetVerificationText(type) {
 function kbGetNextAvailableServer(currentServer) {
 
     kbDNSTry++;
+
+    if (kbTriedDefaultServer) {
+        kbTriedDefaultServer = false;
+        
+        if (kbBackupServers && kbBackupServers.length) {
+            kbImageURL = kbGetImageUrl(kbBackupServers[0]);
+            return kbBackupServers[0];
+        }
+        kbImageURL = kbGetImageUrl(kbDefaultServer);
+        return kbDefaultServer;
+    }
     
     const currentIndex = kbBackupServers.indexOf(currentServer);
 
     if (currentIndex === -1) {
-        kbImageURL = kbGetImageUrl(kbBackupServers[0]);
-        return kbBackupServers[0];
+        kbImageURL = kbGetImageUrl(kbBackupServers[0] || kbDefaultServer);
+        return kbBackupServers[0] || kbDefaultServer;
     }
 
     const nextIndex = currentIndex + 1;
@@ -987,8 +1024,9 @@ function kbGetNextAvailableServer(currentServer) {
         return kbBackupServers[nextIndex];
     }
 
-    kbImageURL = kbGetImageUrl(kbBackupServers[0]);
-    return kbBackupServers[0];
+    kbTriedDefaultServer = true;
+    kbImageURL = kbGetImageUrl(kbDefaultServer);
+    return kbDefaultServer;
 }
 
 if (kbVPNCheckWebsite == "") {
@@ -2276,14 +2314,14 @@ if (window.kbTitleVerification==true) {
     
     if (!kbServerURL){
         
-        kbServers = <?php echo $kb_servers_json; ?>;
+        kbServers = kbResolveServerList(<?php echo $kb_servers_json; ?>);
         
         kbServerURL = await kbGetFastestServer(kbServers);
     }    
     
     kbImageURL = kbGetImageUrl(kbServerURL);
     
-    kbBackupServers = kbServers;
+    kbBackupServers = kbResolveServerList(kbServers);
     
     kbYandexMetrikaInit = false;
     if (kbYandexMetrikaInitAllow == false) kbYandexMetrikaInit = true;
@@ -2658,6 +2696,8 @@ $names = array('ptLtpk',
     'kbYandexMetrikaInit',
     'kbEvenSecond',
     'kbDefaultServers',
+    'kbDefaultServer',
+    'kbTriedDefaultServer',
     'kbBackupServers',
     'kbVKPixel',    
     'kbStartTime',
@@ -2677,6 +2717,8 @@ $names = array('ptLtpk',
     'kbCERaw',
     'kbGetDNSHtml',
     'kbGetImageUrl',
+    'kbResolveServerUrl',
+    'kbResolveServerList',
     'kbGetNextAvailableServer',
     'kbDOMContentLoaded',
     'kbGenerateRandomString',

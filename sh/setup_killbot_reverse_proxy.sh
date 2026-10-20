@@ -115,6 +115,14 @@ killbot_ssl_fail_reason() {
     echo "certificate found, but it is not a wildcard (*.${SITE_DOMAIN})"
 }
 
+remove_site_checked_file() {
+    local checked_file="${SITE_DIR}/killbot_revers_checked"
+    if [[ -f "$checked_file" ]]; then
+        rm -f "$checked_file"
+        echo "Removed ${checked_file}"
+    fi
+}
+
 fail_wildcard_cert_required() {
     local reason="$1"
     echo "ERROR: proxy subdomains require a wildcard certificate (*.${SITE_DOMAIN})." >&2
@@ -162,6 +170,7 @@ ensure_killbot_wildcard_ssl_or_abort() {
 
     reason="$(killbot_ssl_fail_reason)"
     remove_reverse_proxy_nginx_configs
+    remove_site_checked_file
     fail_wildcard_cert_required "$reason"
     exit 1
 }
@@ -406,6 +415,7 @@ print_dns_instructions() {
 handle_proxies_dns_failure() {
     local server_ip="$1"
     remove_reverse_proxy_nginx_configs 1
+    remove_site_checked_file
     print_dns_instructions "${server_ip}"
     exit 0
 }
@@ -427,11 +437,22 @@ write_nginx_site() {
     local proxy_fqdn="$1" backend_host="$2"
     local conf_name="${REVERSE_PROXY_CONF_PREFIX}${proxy_fqdn}.conf"
     local conf_path="${NGINX_SITES_AVAILABLE}/${conf_name}"
+    local enabled_path="${NGINX_SITES_ENABLED}/${conf_name}"
     local legacy_path="${NGINX_SITES_AVAILABLE}/${proxy_fqdn}.conf"
+    local legacy_enabled="${NGINX_SITES_ENABLED}/${proxy_fqdn}.conf"
+    local tmp want_link=0
 
-    rm -f "${legacy_path}" "${NGINX_SITES_ENABLED}/${proxy_fqdn}.conf"
+    if [[ -f "${legacy_path}" ]]; then
+        rm -f "${legacy_path}"
+        NGINX_CHANGED=1
+    fi
+    if [[ -f "${legacy_enabled}" || -L "${legacy_enabled}" ]]; then
+        rm -f "${legacy_enabled}"
+        NGINX_CHANGED=1
+    fi
 
-    cat > "${conf_path}" <<EOF
+    tmp="${conf_path}.tmp.$$"
+    cat > "${tmp}" <<EOF
 # ${proxy_fqdn} -> https://${backend_host}
 server {
     listen 80;
@@ -456,7 +477,23 @@ server {
     }
 }
 EOF
-    ln -sf "${conf_path}" "${NGINX_SITES_ENABLED}/${conf_name}"
+    if [[ -f "${conf_path}" ]] && cmp -s "${tmp}" "${conf_path}"; then
+        rm -f "${tmp}"
+    else
+        mv -f "${tmp}" "${conf_path}"
+        echo "Updated ${conf_path}"
+        NGINX_CHANGED=1
+    fi
+
+    if [[ ! -L "${enabled_path}" ]]; then
+        want_link=1
+    elif [[ "$(readlink -f "${enabled_path}" 2>/dev/null || true)" != "$(readlink -f "${conf_path}" 2>/dev/null || true)" ]]; then
+        want_link=1
+    fi
+    if [[ "$want_link" -eq 1 ]]; then
+        ln -sf "${conf_path}" "${enabled_path}"
+        NGINX_CHANGED=1
+    fi
 }
 
 apply_nginx() {
@@ -481,6 +518,7 @@ reload_nginx() {
 
 GLOBAL_BACKENDS=()
 SITE_PROXIES=()
+NGINX_CHANGED=0
 
 SERVER_IP="$(get_server_public_ip)"
 [[ -n "$SERVER_IP" ]] || { echo "ERROR: failed to detect the server IP"; exit 1; }
@@ -495,6 +533,7 @@ read_site_proxies
 
 if [[ ${#SITE_PROXIES[@]} -eq 0 ]]; then
     echo "ERROR: empty ${SITE_REVERS}"
+    remove_site_checked_file
     exit 1
 fi
 
@@ -505,6 +544,9 @@ fi
 ensure_killbot_wildcard_ssl_or_abort
 
 apply_nginx
-reload_nginx
-
-echo "OK ${SITE_DOMAIN} — nginx reverse proxy is configured, ${SITE_REVERS}"
+if [[ "${NGINX_CHANGED}" -eq 1 ]]; then
+    reload_nginx
+    echo "OK ${SITE_DOMAIN} — nginx reverse proxy is configured, ${SITE_REVERS}"
+else
+    echo "OK ${SITE_DOMAIN} — nginx reverse proxy unchanged, skip reload"
+fi

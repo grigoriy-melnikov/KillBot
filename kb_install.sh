@@ -1092,7 +1092,9 @@ sudo a2enmod lua
 rm -rf /var/log/apache2/*
 rm -rf /var/log/killbot/*
 rm -f /opt/killbot/killbot_revers
+rm -f /opt/killbot/killbot_revers_checked
 rm -f /opt/killbot/settings/*/killbot_revers
+rm -f /opt/killbot/settings/*/killbot_revers_checked
 
 sudo systemctl restart apache2
 
