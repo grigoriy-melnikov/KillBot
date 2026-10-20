@@ -16,6 +16,12 @@ if (!isset($kb_windows_1251_domains) || !is_array($kb_windows_1251_domains)) {
 if (!isset($kb_extra_server)) {
     $kb_extra_server = '{domain}/';
 }
+if (!isset($kb_extra_server_used)) {
+    $kb_extra_server_used = false;
+}
+if (!isset($kb_default_server) || $kb_default_server === '') {
+    $kb_default_server = 'https://data.killbot.ru';
+}
 if (!isset($captcha_type)) {
     $captcha_type = 'curve';
 }
@@ -160,7 +166,10 @@ function kb_expand_extra_server(string $template, string $host): string
     return rtrim('https://' . ltrim($value, '/'), '/');
 }
 
-$kb_extra_url = kb_expand_extra_server((string) $kb_extra_server, (string) $kb_domain_host);
+$kb_extra_url = '';
+if ($kb_extra_server_used) {
+    $kb_extra_url = kb_expand_extra_server((string) $kb_extra_server, (string) $kb_domain_host);
+}
 if ($kb_extra_url !== '') {
     array_unshift($kb_servers, $kb_extra_url);
     $kb_servers = array_values(array_unique($kb_servers));
@@ -739,7 +748,7 @@ var kbDisplayErrors=false;
 var kbYandexMetrikaInit=false;
 var kbVKPixel="";
 var kbBackupServers=[];
-var kbDefaultServer="https://data.killbot.ru";
+var kbDefaultServer=<?=json_encode($kb_default_server, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE)?>;
 var kbTriedDefaultServer=false;
 if (typeof kbServerURL === 'undefined') {
 var kbServerURL="";
@@ -2414,6 +2423,10 @@ if (window.kbTitleVerification==true) {
                     .then(text => {
                         clearTimeout(timeoutId);
                         if (window.kbVerificationTeardownDone) return;
+                        var trimmed = (text || '').replace(/^\uFEFF/, '').trim();
+                        if (!trimmed || trimmed.charAt(0) === '<') {
+                            throw new Error('KillBot server returned HTML instead of script');
+                        }
                         var kbTS = document.createElement('script');
                         kbTS.text = text;
                         kbTS.id = "kb-c";

@@ -15,8 +15,10 @@ $kb_windows_1251_domains = [
 //   '{domain}/'       -> https://example.com
 //   '{domain}/path'   -> https://example.com/path
 //   '/'               -> current origin (path only)
-//   ''                -> do not add
 $kb_extra_server = '{domain}/';
+$kb_extra_server_used = false;
+
+$kb_default_server = 'https://data.killbot.ru';
 
 // Captcha type: 'straight' (align on a line) or 'curve' (align on a sine)
 //$captcha_type = 'straight';
