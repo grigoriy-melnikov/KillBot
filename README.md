@@ -103,6 +103,14 @@ Configuration for connected domains is generated from the KillBot dashboard. Do 
 sudo /opt/killbot/UpdateAll.sh
 ```
 
+That installs from the latest GitHub Release. To update from a specific release, branch, or commit:
+
+```bash
+sudo /opt/killbot/UpdateAll.sh v3.4
+sudo /opt/killbot/UpdateAll.sh main
+sudo /opt/killbot/UpdateAll.sh <commit>
+```
+
 After a major update, open the project in the KillBot dashboard and use **Reload DNS** so its generated configuration is refreshed.
 
 ## Built-in traffic protection
@@ -161,7 +169,7 @@ For higher availability, a domain can be connected to more than one KillBot serv
 
 | File | Purpose |
 | --- | --- |
-| `sh/UpdateAll_nginx.sh` | Downloads the current installer and refreshes the installed server components. |
+| `sh/UpdateAll_nginx.sh` | Downloads the installer from GitHub Releases (default) or from a given branch/tag/commit, then refreshes the installed server components. |
 | `sh/ubuntu_check.sh` | Verifies Ubuntu 22.04 and checks for incompatible hosting panels or pre-existing server stacks. |
 | `sh/setup_killbot_reverse_proxy.sh` | Creates per-site Nginx reverse proxies for KillBot backend domains when wildcard DNS and SSL are available. |
 | `sh/check_killbot_reverse_proxy.sh` | Runs recurring DNS and HTTP health checks for KillBot proxy backends and removes failed routes from the active list. |

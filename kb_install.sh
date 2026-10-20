@@ -26,7 +26,17 @@ KILLBOT_SESSION_LIFETIME=86400 #sec
 
 set -e # Exit immediately if any command fails
 
-KB_GIT_RAW="https://raw.githubusercontent.com/grigoriy-melnikov/KillBot/main"
+# Optional git ref for raw downloads (branch, tag, or commit).
+# UpdateAll.sh passes KB_GIT_REF when not installing from GitHub Releases latest.
+if [[ -z "${KB_GIT_REF:-}" && -n "${1:-}" && "$1" != -* ]]; then
+  KB_GIT_REF="$1"
+fi
+KB_GIT_REF="${KB_GIT_REF:-main}"
+if [[ ! "$KB_GIT_REF" =~ ^[A-Za-z0-9._/-]+$ ]] || [[ "$KB_GIT_REF" == *..* ]]; then
+  echo "ERROR: invalid KB_GIT_REF: ${KB_GIT_REF}"
+  exit 1
+fi
+KB_GIT_RAW="https://raw.githubusercontent.com/grigoriy-melnikov/KillBot/${KB_GIT_REF}"
 
 kb_download() {
   local dest="$1"
@@ -1092,9 +1102,7 @@ sudo a2enmod lua
 rm -rf /var/log/apache2/*
 rm -rf /var/log/killbot/*
 rm -f /opt/killbot/killbot_revers
-rm -f /opt/killbot/killbot_revers_checked
-rm -f /opt/killbot/settings/*/killbot_revers
-rm -f /opt/killbot/settings/*/killbot_revers_checked
+
 
 sudo systemctl restart apache2
 
@@ -4130,7 +4138,7 @@ sudo sudo tee /opt/killbot/update.sh > /dev/null <<EOF
 kb_download() {
   local dest="\$1"
   local path="\$2"
-  timeout 15 curl --connect-timeout 10 -f -L -o "\$dest" "https://raw.githubusercontent.com/grigoriy-melnikov/KillBot/main/\$path"
+  timeout 15 curl --connect-timeout 10 -f -L -o "\$dest" "https://raw.githubusercontent.com/grigoriy-melnikov/KillBot/${KB_GIT_REF}/\$path"
 }
 
 FILE="/opt/killbot/html/verification.php"
