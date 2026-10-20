@@ -2795,7 +2795,22 @@ foreach ($names AS $item){
 $replaces []= "kb".generateRandomString(rand(3,5));
 }
 
-$html = str_replace($names, $replaces, $html);
+$replace_counts = array_count_values($replaces);
+$names_keep = array();
+$replaces_keep = array();
+foreach ($names as $i => $name) {
+    $rep = $replaces[$i];
+    if ($replace_counts[$rep] !== 1) {
+        continue;
+    }
+    if (in_array($rep, $names, true)) {
+        continue;
+    }
+    $names_keep[] = $name;
+    $replaces_keep[] = $rep;
+}
+
+$html = str_replace($names_keep, $replaces_keep, $html);
 
 ob_end_clean();
 $size=0;
