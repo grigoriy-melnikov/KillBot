@@ -7,7 +7,7 @@
 #   -y  skip the "Enter..." pause after instructions (unattended)
 #
 # /opt/killbot/killbot_revers                        — shared Killbot backends (one domain per line)
-# /opt/killbot/settings/SITE/killbot_revers          — r1.SITE:backend, r2.SITE:backend, … (full format immediately)
+# /opt/killbot/settings/SITE/killbot_revers          — rebuilt on every run: r1.SITE:backend, r2.SITE:backend, …
 # Nginx reverse proxy — only with a wildcard in /opt/killbot/ssl/SITE_DOMAIN/ (fullchain.pem + privkey.pem).
 # Nginx configs: /etc/nginx/sites-available/000-{proxy_fqdn}.conf (000- prefix — loaded before *.SITE)
 #
@@ -40,7 +40,6 @@ REVERSE_PROXY_CONF_PREFIX="${REVERSE_PROXY_CONF_PREFIX:-000-}"
 GLOBAL_BACKENDS_FILE="${GLOBAL_BACKENDS_FILE:-/opt/killbot/killbot_revers}"
 SETTINGS_BASE="${SETTINGS_BASE:-/opt/killbot/settings}"
 PROXY_LABEL_PREFIX="${PROXY_LABEL_PREFIX:-r}"
-KEEP_EXISTING_MAP="${KEEP_EXISTING_MAP:-1}"
 AUTO_YES=0
 
 usage() {
@@ -135,7 +134,8 @@ fail_wildcard_cert_required() {
 
 remove_reverse_proxy_nginx_configs() {
     local quiet="${1:-0}"
-    [[ -s "${SITE_REVERS}" ]] || return 0
+    local skip_reload="${2:-0}"
+    [[ ${#SITE_PROXIES[@]} -gt 0 ]] || return 0
 
     local proxy conf_name conf_path removed=0
 
@@ -154,10 +154,22 @@ remove_reverse_proxy_nginx_configs() {
             [[ "$quiet" == "1" ]] || echo "Removed nginx enabled: ${NGINX_SITES_ENABLED}/${conf_name}"
             removed=1
         fi
+        # leftover configs without the 000- prefix
+        if [[ -f "${NGINX_SITES_AVAILABLE}/${proxy}.conf" ]]; then
+            rm -f "${NGINX_SITES_AVAILABLE}/${proxy}.conf"
+            removed=1
+        fi
+        if [[ -f "${NGINX_SITES_ENABLED}/${proxy}.conf" || -L "${NGINX_SITES_ENABLED}/${proxy}.conf" ]]; then
+            rm -f "${NGINX_SITES_ENABLED}/${proxy}.conf"
+            removed=1
+        fi
     done
 
-    if [[ "$removed" -eq 1 ]] && command -v nginx >/dev/null 2>&1; then
-        reload_nginx
+    if [[ "$removed" -eq 1 ]]; then
+        NGINX_CHANGED=1
+        if [[ "$skip_reload" != "1" ]] && command -v nginx >/dev/null 2>&1; then
+            reload_nginx
+        fi
     fi
 }
 
@@ -239,6 +251,9 @@ verify_all_proxies_dns() {
     local -a ips=()
     local all_ok=1
 
+    DNS_OK_PROXIES=()
+    DNS_FAILED_PROXIES=()
+
     [[ ${#SITE_PROXIES[@]} -gt 0 ]] || return 1
 
     echo "DNS check via dig @${DNSServer} (A records must include ${server_ip}, extra A records are allowed):"
@@ -247,9 +262,11 @@ verify_all_proxies_dns() {
         resolved="$(format_a_ips_list "${ips[@]}")"
         if a_list_contains_ip "$server_ip" "${ips[@]}"; then
             status="OK"
+            DNS_OK_PROXIES+=("$proxy")
         else
             status="FAIL"
             all_ok=0
+            DNS_FAILED_PROXIES+=("$proxy")
         fi
         echo "  ${status}  ${proxy}  ->  ${resolved}"
     done
@@ -294,32 +311,10 @@ read_global_backends() {
     done < "${GLOBAL_BACKENDS_FILE}"
 }
 
-site_revers_state() {
-    # stdout: empty | pending | complete
-    local line has=0 has_colon=0 has_plain=0
-    [[ -s "${SITE_REVERS}" ]] || { echo "empty"; return; }
-    while IFS= read -r line || [[ -n "$line" ]]; do
-        line="${line%%#*}"
-        line="$(echo "$line" | tr -d '[:space:]')"
-        [[ -z "$line" ]] && continue
-        has=1
-        if [[ "$line" == *:* ]]; then
-            has_colon=1
-        else
-            has_plain=1
-        fi
-    done < "${SITE_REVERS}"
-    [[ "$has" -eq 0 ]] && { echo "empty"; return; }
-    if [[ "$has_colon" -eq 1 && "$has_plain" -eq 0 ]]; then
-        echo "complete"
-    else
-        echo "pending"
-    fi
-}
-
 read_site_proxies() {
     SITE_PROXIES=()
     local line proxy
+    [[ -s "${SITE_REVERS}" ]] || return 0
     while IFS= read -r line || [[ -n "$line" ]]; do
         line="${line%%#*}"
         line="$(echo "$line" | tr -d '[:space:]')"
@@ -331,6 +326,75 @@ read_site_proxies() {
         fi
         [[ -n "$proxy" ]] && SITE_PROXIES+=("$proxy")
     done < "${SITE_REVERS}"
+}
+
+proxy_is_current() {
+    local needle="$1" proxy
+    for proxy in "${SITE_PROXIES[@]}"; do
+        [[ "$proxy" == "$needle" ]] && return 0
+    done
+    return 1
+}
+
+# Drop nginx vhosts for this site that are no longer in the rebuilt map.
+remove_obsolete_site_nginx_configs() {
+    local conf_path conf_name proxy domain_re
+    local -a obsolete=()
+    local -a saved_proxies
+
+    domain_re="$(printf '%s' "$SITE_DOMAIN" | sed 's/[.[\*^$()+?{}|]/\\&/g')"
+
+    shopt -s nullglob
+    for conf_path in "${NGINX_SITES_AVAILABLE}/${REVERSE_PROXY_CONF_PREFIX}"*.conf "${NGINX_SITES_AVAILABLE}"/*.conf; do
+        [[ -f "$conf_path" ]] || continue
+        conf_name="$(basename "$conf_path" .conf)"
+        proxy="${conf_name#${REVERSE_PROXY_CONF_PREFIX}}"
+        if [[ "$proxy" =~ ^${PROXY_LABEL_PREFIX}[0-9]+\.${domain_re}$ ]]; then
+            if ! proxy_is_current "$proxy"; then
+                obsolete+=("$proxy")
+            fi
+        fi
+    done
+    shopt -u nullglob
+
+    for proxy in "${OLD_SITE_PROXIES[@]}"; do
+        [[ -n "$proxy" ]] || continue
+        if ! proxy_is_current "$proxy"; then
+            obsolete+=("$proxy")
+        fi
+    done
+
+    [[ ${#obsolete[@]} -gt 0 ]] || return 0
+
+    saved_proxies=("${SITE_PROXIES[@]}")
+    SITE_PROXIES=("${obsolete[@]}")
+    remove_reverse_proxy_nginx_configs 0 1
+    SITE_PROXIES=("${saved_proxies[@]}")
+}
+
+prune_site_checked_file() {
+    local checked_file="${SITE_DIR}/killbot_revers_checked"
+    local tmp line host kept=0
+    [[ -f "$checked_file" ]] || return 0
+
+    tmp="$(mktemp)"
+    while IFS= read -r line || [[ -n "$line" ]]; do
+        host="$(strip_scheme "$line")"
+        if proxy_is_current "$host"; then
+            printf '%s\n' "$line" >> "$tmp"
+            kept=1
+        fi
+    done < "$checked_file"
+
+    if [[ "$kept" -eq 0 ]]; then
+        rm -f "$checked_file" "$tmp"
+        echo "Removed ${checked_file}"
+    elif ! cmp -s "$tmp" "$checked_file"; then
+        mv -f "$tmp" "$checked_file"
+        echo "Updated ${checked_file}"
+    else
+        rm -f "$tmp"
+    fi
 }
 
 write_site_revers_map() {
@@ -356,15 +420,10 @@ write_site_revers_map() {
 prepare_site_proxy_list() {
     ensure_global_backends
     read_global_backends
-
-    local state
-    state="$(site_revers_state)"
-
-    if [[ "$state" == "complete" && "${KEEP_EXISTING_MAP}" == "1" ]]; then
-        return 0
-    fi
-
+    read_site_proxies
+    OLD_SITE_PROXIES=("${SITE_PROXIES[@]}")
     write_site_revers_map
+    echo "Rebuilt ${SITE_REVERS} from ${GLOBAL_BACKENDS_FILE} (${#GLOBAL_BACKENDS[@]} backends)"
 }
 
 wait_for_enter() {
@@ -414,8 +473,17 @@ print_dns_instructions() {
 
 handle_proxies_dns_failure() {
     local server_ip="$1"
-    remove_reverse_proxy_nginx_configs 1
-    remove_site_checked_file
+    local -a saved_proxies=("${SITE_PROXIES[@]}")
+
+    # Drop nginx only for names that fail DNS; keep working r1..rN in place.
+    if [[ ${#DNS_FAILED_PROXIES[@]} -gt 0 ]]; then
+        SITE_PROXIES=("${DNS_FAILED_PROXIES[@]}")
+        remove_reverse_proxy_nginx_configs 1
+        SITE_PROXIES=("${saved_proxies[@]}")
+    fi
+    if [[ ${#DNS_OK_PROXIES[@]} -eq 0 ]]; then
+        remove_site_checked_file
+    fi
     print_dns_instructions "${server_ip}"
     exit 0
 }
@@ -518,6 +586,9 @@ reload_nginx() {
 
 GLOBAL_BACKENDS=()
 SITE_PROXIES=()
+OLD_SITE_PROXIES=()
+DNS_OK_PROXIES=()
+DNS_FAILED_PROXIES=()
 NGINX_CHANGED=0
 
 SERVER_IP="$(get_server_public_ip)"
@@ -530,6 +601,8 @@ prepare_site_proxy_list
 ensure_global_backends
 read_global_backends
 read_site_proxies
+remove_obsolete_site_nginx_configs
+prune_site_checked_file
 
 if [[ ${#SITE_PROXIES[@]} -eq 0 ]]; then
     echo "ERROR: empty ${SITE_REVERS}"
@@ -548,5 +621,5 @@ if [[ "${NGINX_CHANGED}" -eq 1 ]]; then
     reload_nginx
     echo "OK ${SITE_DOMAIN} — nginx reverse proxy is configured, ${SITE_REVERS}"
 else
-    echo "OK ${SITE_DOMAIN} — nginx reverse proxy unchanged, skip reload"
+    echo "OK ${SITE_DOMAIN} — nginx reverse proxy unchanged, skip reload (${#SITE_PROXIES[@]} proxies, ${SITE_REVERS})"
 fi
