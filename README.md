@@ -155,6 +155,7 @@ For higher availability, a domain can be connected to more than one KillBot serv
 | File | Purpose |
 | --- | --- |
 | `html/verification.html` | Main JavaScript verification page shown before access to a protected site. |
+| `html/verification_options.php` | Optional captcha, encoding, and extra-server settings. Installed once and not overwritten on update. |
 | `html/FakeBot.html` | Response page for a client impersonating an allowlisted or official bot. |
 | `html/BlockBot.html` | Response page for a blocked client. |
 | `html/Expired.html` | Response shown when a KillBot session or permission has expired. |

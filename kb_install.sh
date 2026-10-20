@@ -1175,6 +1175,17 @@ if [ ! -f "$FILE" ]; then
         echo "Error loading the verification page."
         exit 1
     fi
+fi
+
+FILE="/opt/killbot/html/verification_options.php"
+if [ ! -f "$FILE" ]; then
+    kb_download "$FILE" "html/verification_options.php"
+    if [ $? -eq 0 ]; then
+        echo "The verification options have been successfully loaded."
+    else
+        echo "Error loading the verification options."
+        exit 1
+    fi
     #sudo test -f /var/www/html/.htaccess || sudo tee /var/www/html/.htaccess > /dev/null <<EOF
     #<FilesMatch "\.(html|htm)$">
     #    Header set Cache-Control "no-cache, no-store, must-revalidate"
@@ -1452,7 +1463,7 @@ FILE="/opt/killbot/dns_provider_hint.sh"
 sudo chmod +x /opt/killbot/check_killbot_reverse_proxy.sh /opt/killbot/setup_killbot_reverse_proxy.sh /opt/killbot/update-postrouting.sh /opt/killbot/update-symmetric-ip.sh /opt/killbot/check_host_curl.sh /opt/killbot/read_apache_log.sh
 sudo chmod 644 /opt/killbot/dns_provider_hint.sh
 
-sudo chown www-data:www-data /opt/killbot/html/FakeBot.php /opt/killbot/html/BlockBot.html /opt/killbot/html/Expired.html /opt/killbot/html/verification.php
+sudo chown www-data:www-data /opt/killbot/html/FakeBot.php /opt/killbot/html/BlockBot.html /opt/killbot/html/Expired.html /opt/killbot/html/verification.php /opt/killbot/html/verification_options.php
 sudo chmod +x /opt/killbot/f2b/subnet-monitor.sh /opt/killbot/renew_wildcard.sh /opt/killbot/acme_check_api.sh /opt/killbot/UpdateAll.sh /opt/killbot/official_allowed_ips.sh
 sudo chmod +x /opt/killbot/cert_delete.sh /opt/killbot/f2b/block_all_countries_except.sh /opt/killbot/f2b/check_apache_and_block.sh /opt/killbot/f2b/unblock_traffic.sh
 
@@ -4178,6 +4189,19 @@ FILE="/opt/killbot/html/verification.php"
         exit 1
     fi
 
+FILE="/opt/killbot/html/verification_options.php"
+if [ ! -f "\$FILE" ]; then
+    kb_download "\$FILE" "html/verification_options.php"
+    if [ \$? -eq 0 ]; then
+        echo "The verification options have been successfully loaded."
+    else
+        echo "Error loading the verification options."
+        exit 1
+    fi
+else
+    echo "Keep existing verification options: \$FILE"
+fi
+
     #sudo test -f /var/www/html/.htaccess || sudo tee /var/www/html/.htaccess > /dev/null <<EOF
     #<FilesMatch "\.(html|htm)$">
     #    Header set Cache-Control "no-cache, no-store, must-revalidate"
@@ -4208,7 +4232,7 @@ FILE="/opt/killbot/html/Expired.html"
         exit 1
     fi
 
-sudo chown www-data:www-data /opt/killbot/html/FakeBot.php /opt/killbot/html/verification.php
+sudo chown www-data:www-data /opt/killbot/html/FakeBot.php /opt/killbot/html/verification.php /opt/killbot/html/verification_options.php
 
 FILE="/opt/killbot/cert_wildcard_new.sh"
 
