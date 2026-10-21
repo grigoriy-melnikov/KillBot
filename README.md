@@ -185,7 +185,6 @@ For higher availability, a domain can be connected to more than one KillBot serv
 
 | File | Purpose |
 | --- | --- |
-| `sh/renew_wildcard.sh` | Legacy entry point; wildcard certificates are no longer issued or renewed here. |
 | `sh/cert_wildcard_new.sh` | Starts manual DNS-01 wildcard certificate issuance with Certbot. |
 | `sh/cert_delete.sh` | Removes a Let's Encrypt certificate and, unless disabled by an argument, its local KillBot SSL files. |
 | `sh/clean_up_unused_certs.sh` | Removes certificates that are no longer used by local virtual hosts or no longer point to the server. |

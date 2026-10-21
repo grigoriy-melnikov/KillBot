@@ -1140,16 +1140,6 @@ FILE="/opt/killbot/official_allowed_ips.sh"
         exit 1
     fi
 
-FILE="/opt/killbot/renew_wildcard.sh"
-    kb_download "$FILE" "sh/renew_wildcard.sh"
-
-    if [ $? -eq 0 ]; then
-        echo "The renew_wildcard.sh file has been successfully loaded."
-    else
-        echo "Error loading the renew_wildcard.sh file."
-        exit 1
-    fi
-
 FILE="/opt/killbot/html/FakeBot.php"
 if [ ! -f "$FILE" ]; then
     kb_download "$FILE" "html/FakeBot.html"
@@ -1352,8 +1342,8 @@ sudo chmod 755 /opt/killbot/check_host_curl.sh /opt/killbot/read_apache_log.sh
 sudo chmod 644 /opt/killbot/dns_provider_hint.sh
 
 sudo chown www-data:www-data /opt/killbot/html/FakeBot.php /opt/killbot/html/BlockBot.html /opt/killbot/html/Expired.html /opt/killbot/html/verification.php /opt/killbot/html/verification_options.php
-sudo chmod +x /opt/killbot/f2b/subnet-monitor.sh /opt/killbot/UpdateAll.sh /opt/killbot/official_allowed_ips.sh /opt/killbot/renew_wildcard.sh
-rm -f /opt/killbot/acme_check_api.sh /etc/cron.d/killbot-wildcard-renewal
+sudo chmod +x /opt/killbot/f2b/subnet-monitor.sh /opt/killbot/UpdateAll.sh /opt/killbot/official_allowed_ips.sh
+rm -f /opt/killbot/acme_check_api.sh /opt/killbot/renew_wildcard.sh /etc/cron.d/killbot-wildcard-renewal
 sudo chmod +x /opt/killbot/cert_delete.sh /opt/killbot/f2b/block_all_countries_except.sh /opt/killbot/f2b/check_apache_and_block.sh /opt/killbot/f2b/unblock_traffic.sh
 
 sudo tee /opt/killbot/kbEqual.php > /dev/null <<EOF
@@ -4362,16 +4352,6 @@ FILE="/opt/killbot/official_allowed_ips.sh"
         exit 1
     fi
 
-FILE="/opt/killbot/renew_wildcard.sh"
-    kb_download "\$FILE" "sh/renew_wildcard.sh"
-
-    if [ \$? -eq 0 ]; then
-        echo "The renew_wildcard.sh file has been successfully loaded."
-    else
-        echo "Error loading the renew_wildcard.sh file."
-        exit 1
-    fi
-
 FILE="/opt/killbot/cert_delete.sh"
     kb_download "\$FILE" "sh/cert_delete.sh"
     
@@ -4520,8 +4500,8 @@ FILE="/opt/killbot/read_apache_log.sh"
 sudo chmod +x /opt/killbot/check_killbot_reverse_proxy.sh /opt/killbot/setup_killbot_reverse_proxy.sh /opt/killbot/update-postrouting.sh /opt/killbot/update-symmetric-ip.sh /opt/killbot/check_host_curl.sh /opt/killbot/read_apache_log.sh
 sudo chown root:root /opt/killbot/check_host_curl.sh /opt/killbot/read_apache_log.sh /opt/killbot/install.sh /etc/init.d/kb 2>/dev/null || true
 sudo chmod 755 /opt/killbot/check_host_curl.sh /opt/killbot/read_apache_log.sh /opt/killbot/install.sh /etc/init.d/kb 2>/dev/null || true
-sudo chmod +x /opt/killbot/f2b/subnet-monitor.sh /opt/killbot/cert_delete.sh /opt/killbot/on_killbot_protection.sh /opt/killbot/off_killbot_protection.sh /opt/killbot/official_allowed_ips.sh /opt/killbot/cert_wildcard_new.sh /opt/killbot/clean_up_unused_certs.sh /opt/killbot/UpdateAll.sh /opt/killbot/renew_wildcard.sh
-rm -f /opt/killbot/acme_check_api.sh /etc/cron.d/killbot-wildcard-renewal
+sudo chmod +x /opt/killbot/f2b/subnet-monitor.sh /opt/killbot/cert_delete.sh /opt/killbot/on_killbot_protection.sh /opt/killbot/off_killbot_protection.sh /opt/killbot/official_allowed_ips.sh /opt/killbot/cert_wildcard_new.sh /opt/killbot/clean_up_unused_certs.sh /opt/killbot/UpdateAll.sh
+rm -f /opt/killbot/acme_check_api.sh /opt/killbot/renew_wildcard.sh /etc/cron.d/killbot-wildcard-renewal
 sudo chmod +x  /opt/killbot/f2b/block_all_countries_except.sh  /opt/killbot/f2b/check_apache_and_block.sh  /opt/killbot/f2b/unblock_traffic.sh /opt/killbot/official_allowed_ips.sh
 
 EOF
@@ -5314,7 +5294,7 @@ echo "KillBot cron file: $CRON_FILE"
 #sudo ufw reload
 #sudo ufw status
 
-rm -f /etc/cron.d/killbot-wildcard-renewal /opt/killbot/acme_check_api.sh
+rm -f /etc/cron.d/killbot-wildcard-renewal /opt/killbot/acme_check_api.sh /opt/killbot/renew_wildcard.sh
 
 # These parameters increase the backlog size for half-open TCP connections
 # and enable SYN cookies protection to resist TCP SYN flood attacks.
