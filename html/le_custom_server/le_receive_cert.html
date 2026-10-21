@@ -1,25 +1,35 @@
 <?php
 /**
- * Автономный приём wildcard-сертификата на worker-сервере (POST с LE-сервера).
- * Один файл — без require/include. Залить как le_receive_cert.php в DocumentRoot.
+ * Receive a wildcard certificate on the worker (POST from the LE server).
+ * Deploy as le_receive_cert.php in DocumentRoot.
  *
  * URL: https://WORKER_IP/le_receive_cert.php?domain=example.com
- * POST: fullchain, privkey (текст PEM или multipart)
+ * POST: fullchain, privkey (PEM text or multipart)
  *
- * Сохранение: /opt/killbot/ssl/{domain}/fullchain.pem, privkey.pem
+ * Options live in /opt/killbot/settings.php (not overwritten on update).
+ * Save path: /opt/killbot/ssl/{domain}/fullchain.pem, privkey.pem
  */
 
 declare(strict_types=1);
 
 header('Content-Type: application/json; charset=utf-8');
 
+$kb_accept_centralized_certs = true;
+$kb_le_allowed_server_ips = ['45.66.116.213', '31.211.65.236'];
+$kb_le_ssl_base_dir = '/opt/killbot/ssl';
+$kb_le_letsencrypt_dir = '/etc/letsencrypt';
+$kb_le_remove_local_letsencrypt = true;
+
+$kb_settings_file = '/opt/killbot/settings.php';
+if (is_readable($kb_settings_file)) {
+    include $kb_settings_file;
+}
+
 $config = [
-    // IP LE-сервера, с которого разрешена загрузка (можно несколько)
-    'allowed_le_server_ips' => ['45.66.116.213', '31.211.65.236'],
-    'ssl_base_dir' => '/opt/killbot/ssl',
-    'letsencrypt_dir' => '/etc/letsencrypt',
-    // Удалить локальный certbot/LE для домена после успешного приёма центрального серта
-    'remove_local_letsencrypt' => true,
+    'allowed_le_server_ips' => is_array($kb_le_allowed_server_ips) ? $kb_le_allowed_server_ips : [],
+    'ssl_base_dir' => (string) $kb_le_ssl_base_dir,
+    'letsencrypt_dir' => (string) $kb_le_letsencrypt_dir,
+    'remove_local_letsencrypt' => !empty($kb_le_remove_local_letsencrypt),
 ];
 
 function le_receive_json(int $code, array $body): void
@@ -138,6 +148,13 @@ function le_receive_remove_local_letsencrypt(string $domain, array $config): arr
         'message' => 'certbot delete completed',
         'output' => $outputText,
     ];
+}
+
+if ($kb_accept_centralized_certs !== true) {
+    le_receive_json(403, [
+        'status' => 'error',
+        'message' => 'Centralized certificate receive is disabled in /opt/killbot/settings.php',
+    ]);
 }
 
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') {

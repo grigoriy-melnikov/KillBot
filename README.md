@@ -149,6 +149,7 @@ For higher availability, a domain can be connected to more than one KillBot serv
 | File | Purpose |
 | --- | --- |
 | `kb_install.sh` | Validates the host, installs the complete KillBot stack and dependencies, creates runtime configuration under `/opt/killbot`, and installs maintenance jobs. It is also used to refresh an existing installation. |
+| `settings.php` | Local server options installed once as `/opt/killbot/settings.php` and not overwritten on update. Controls centralized certificate receive (`$kb_accept_centralized_certs`) and whether `install.sh` may reconfigure sites (`$kb_allow_install_sh`). |
 
 ### Verification pages (`html/`)
 
@@ -164,7 +165,7 @@ For higher availability, a domain can be connected to more than one KillBot serv
 | `html/empty_nginx.html` | Empty/default response used by Nginx. |
 | `html/empty_ru.html` | Russian placeholder response. |
 | `html/empty_en.html` | English placeholder response. |
-| `html/le_custom_server/le_receive_cert.html` | Page used by the custom-server certificate workflow. |
+| `html/le_custom_server/le_receive_cert.html` | Receives a centralized fullchain and privkey. Options are read from `/opt/killbot/settings.php`; set `$kb_accept_centralized_certs = false` to refuse every upload and leave local certbot certificates untouched. |
 
 ### Core and proxy management (`sh/`)
 
@@ -184,8 +185,7 @@ For higher availability, a domain can be connected to more than one KillBot serv
 
 | File | Purpose |
 | --- | --- |
-| `sh/renew_wildcard.sh` | Issues or renews wildcard certificates through `acme.sh` and a supported DNS provider API. |
-| `sh/acme_check_api.sh` | Validates DNS API credentials and detects the matching `acme.sh` DNS provider hook. |
+| `sh/renew_wildcard.sh` | Legacy entry point; wildcard certificates are no longer issued or renewed here. |
 | `sh/cert_wildcard_new.sh` | Starts manual DNS-01 wildcard certificate issuance with Certbot. |
 | `sh/cert_delete.sh` | Removes a Let's Encrypt certificate and, unless disabled by an argument, its local KillBot SSL files. |
 | `sh/clean_up_unused_certs.sh` | Removes certificates that are no longer used by local virtual hosts or no longer point to the server. |
@@ -209,6 +209,7 @@ For higher availability, a domain can be connected to more than one KillBot serv
 - Keep webhook and payment-provider allowlists current.
 - Review thresholds before enabling aggressive subnet or country blocking on a high-traffic website.
 - Back up custom verification-page changes before updating the server.
+- `/opt/killbot/settings.php` is local server configuration and is not overwritten on update. Set `$kb_accept_centralized_certs = false` so private keys are never received from KillBot; local Certbot issuance is left as-is. Set `$kb_allow_install_sh = false` to block site reconfiguration via `install.sh`.
 
 ## Documentation
 

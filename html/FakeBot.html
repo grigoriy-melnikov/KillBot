@@ -1,9 +1,18 @@
 <?php
 $ips = array();
 
-$cliForwardedFor = (isset($argc)&&$argc > 1) ? $argv[1] : null;
-$cliRemoteAddr = (isset($argc)&&$argc > 2) ? $argv[2] : null;
-$user_agent = (isset($argc)&&$argc > 3) ? $argv[3] : null;
+$cliForwardedFor = getenv('KB_CLI_XFF');
+$cliRemoteAddr = getenv('KB_CLI_IP');
+$user_agent = getenv('KB_CLI_UA');
+if ($cliForwardedFor === false) {
+    $cliForwardedFor = (isset($argc)&&$argc > 1) ? $argv[1] : null;
+}
+if ($cliRemoteAddr === false) {
+    $cliRemoteAddr = (isset($argc)&&$argc > 2) ? $argv[2] : null;
+}
+if ($user_agent === false) {
+    $user_agent = (isset($argc)&&$argc > 3) ? $argv[3] : null;
+}
 
 $httpXForwardedFor = isset($_SERVER['HTTP_X_FORWARDED_FOR']) 
     ? $_SERVER['HTTP_X_FORWARDED_FOR'] 

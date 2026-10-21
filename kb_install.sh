@@ -13,12 +13,6 @@ MAX_CONNECTIONS_WORKERS=5000
 
 KILLBOT_ACCOUNT_TOKEN="p6CmXezQY"
 
-# Maximum number of simultaneous connections for bots
-MAX_CONNECTIONS_BOTS=50
-
-# Maximum number of simultaneous connections from a single IP to the verification page
-MAX_CONNECTIONS_IP_VP=20
-
 MAX_OPEN_FILES=1000000
 MAX_OPEN_FILES_SYS=3000000
 MAX_PROCESSES=20000
@@ -885,136 +879,6 @@ EOF
 sysctl --system
 sysctl net.ipv4.tcp_syncookies net.core.somaxconn net.ipv4.tcp_max_syn_backlog net.ipv4.tcp_synack_retries
 
-# Install acme.sh for wildcard SSL certificates
-
-# Check if acme.sh is already installed
-if [ ! -f "/root/.acme.sh/acme.sh" ]; then
-    echo "Installing acme.sh..."
-    curl https://get.acme.sh | sh -s email=admin@killbot.ru
-else
-    echo "acme.sh is already installed, skipping installation..."
-fi
-
-sudo mkdir -p /usr/local/bin
-
-# Create symbolic link (force overwrite if exists)
-sudo ln -sf /root/.acme.sh/acme.sh /usr/local/bin/acme.sh
-sudo chmod +x /usr/local/bin/acme.sh
-
-echo "Custom DNS hook for Reg.ru with SSL certificate support created successfully!"
-
-# Create DNS hooks for Russian hosting providers
-sudo tee /root/.acme.sh/dnsapi/dns_beget.sh > /dev/null <<'EOF'
-#!/usr/bin/env sh
-
-# Beget DNS API integration for acme.sh
-# Corrected implementation using changeRecords endpoint
-# https://beget.com/
-
-dns_beget_add() {
-  fulldomain=$1
-  txtvalue=$2
-
-  BEGET_LOGIN="${BEGET_LOGIN:-$(_readaccountconf_mutable BEGET_LOGIN)}"
-  BEGET_PASSWORD="${BEGET_PASSWORD:-$(_readaccountconf_mutable BEGET_PASSWORD)}"
-
-  if [ -z "$BEGET_LOGIN" ] || [ -z "$BEGET_PASSWORD" ]; then
-    _err "You didn't specify Beget login or password."
-    return 1
-  fi
-
-  _saveaccountconf_mutable BEGET_LOGIN "$BEGET_LOGIN"
-  _saveaccountconf_mutable BEGET_PASSWORD "$BEGET_PASSWORD"
-
-  _info "Adding TXT record for $fulldomain"
-
-  # 1️⃣ Get all current TXT records from the local cache (if any)
-  _readaccountconf BEGET_TXT_CACHE
-  if [ -n "$BEGET_TXT_CACHE" ]; then
-    current_txts="$BEGET_TXT_CACHE"
-  else
-    current_txts=""
-  fi
-
-  # 2️⃣ Add the new value to the list
-  new_txts="${current_txts}${txtvalue} "
-
-  # 3️⃣ Build JSON including all TXT records
-  txt_json=""
-  for t in $new_txts; do
-    txt_json="${txt_json}{\"priority\":10,\"value\":\"$t\"},"
-  done
-  txt_json="[${txt_json%,}]"
-
-  input_data=$(printf '{"fqdn":"%s","records":{"TXT":%s}}' "$fulldomain" "$txt_json")
-
-  # 4️⃣ Send the request
-  response=$(curl -s "https://api.beget.com/api/dns/changeRecords" \
-    -G \
-    --data-urlencode "login=$BEGET_LOGIN" \
-    --data-urlencode "passwd=$BEGET_PASSWORD" \
-    --data-urlencode "input_format=json" \
-    --data-urlencode "output_format=json" \
-    --data-urlencode "input_data=$input_data")
-
-  if echo "$response" | grep -q 'true'; then
-    _info "✅ TXT record added OK"
-    _saveaccountconf_mutable BEGET_TXT_CACHE "$new_txts"
-    return 0
-  else
-    _err "❌ Failed to add TXT record: $response"
-    return 1
-  fi
-}
-
-dns_beget_rm() {
-  fulldomain=$1
-  txtvalue=$2
-
-  _readaccountconf BEGET_TXT_CACHE
-  if [ -n "$BEGET_TXT_CACHE" ]; then
-    new_cache=$(echo "$BEGET_TXT_CACHE" | sed "s/$txtvalue//g")
-    _saveaccountconf_mutable BEGET_TXT_CACHE "$new_cache"
-  fi
-
-  _info "Removing TXT record for $fulldomain (not supported by Beget API)"
-  return 0
-}
-
-EOF
-
-# Make DNS hooks executable
-sudo chmod +x /root/.acme.sh/dnsapi/dns_beget.sh
-sudo chmod +x /root/.acme.sh/dnsapi/dns_timeweb.sh
-
-# Create placeholder DNS hooks for other Russian providers
-for provider in sprinthost spaceweb fornex adminvps; do
-    sudo tee "/root/.acme.sh/dnsapi/dns_${provider}.sh" > /dev/null <<EOF
-#!/usr/bin/env sh
-
-# ${provider^} DNS API
-# Placeholder implementation - requires provider-specific API integration
-
-dns_${provider}_add() {
-    fulldomain=\$1
-    txtvalue=\$2
-    
-    _err "${provider^} DNS API integration not yet implemented"
-    _err "Please contact support or use a different DNS provider"
-    return 1
-}
-
-dns_${provider}_rm() {
-    fulldomain=\$1
-    txtvalue=\$2
-    
-    _info "TXT record removal for ${provider^} not implemented"
-    return 0
-}
-EOF
-    sudo chmod +x "/root/.acme.sh/dnsapi/dns_${provider}.sh"
-done
-
 sudo a2enmod security2
 sudo a2enmod reqtimeout
 #sudo apt install lua-md5
@@ -1194,6 +1058,38 @@ if [ ! -f "$FILE" ]; then
     #</FilesMatch>
 fi
 
+if [ ! -f /opt/killbot/settings.php ]; then
+sudo tee /opt/killbot/settings.php > /dev/null <<'EOF'
+<?php
+// Local KillBot server settings.
+// Created once at /opt/killbot/settings.php and not overwritten on update.
+// Edit this file as root. www-data can read it but cannot change it.
+
+// Accept fullchain + privkey from the centralized LE server (le_receive_cert.php).
+// Set to false to refuse every POST, never write keys, and never delete local certbot certs.
+$kb_accept_centralized_certs = true;
+
+// Allow /opt/killbot/install.sh to configure or reconfigure sites (including via kb.php).
+// Set to false so install.sh exits immediately and does not change site config.
+$kb_allow_install_sh = true;
+
+// IPs allowed to POST certificates to le_receive_cert.php
+$kb_le_allowed_server_ips = ['45.66.116.213', '31.211.65.236'];
+
+$kb_le_ssl_base_dir = '/opt/killbot/ssl';
+$kb_le_letsencrypt_dir = '/etc/letsencrypt';
+
+// After a successful centralized receive, delete the local certbot certificate for that domain.
+// Ignored when $kb_accept_centralized_certs is false.
+$kb_le_remove_local_letsencrypt = true;
+EOF
+    echo "Created /opt/killbot/settings.php"
+else
+    echo "Keep existing settings: /opt/killbot/settings.php"
+fi
+sudo chown root:root /opt/killbot/settings.php
+sudo chmod 644 /opt/killbot/settings.php
+
 FILE="/var/www/html/empty.php"
     kb_download "$FILE" "html/empty_nginx.html"
     
@@ -1234,26 +1130,6 @@ FILE="/opt/killbot/UpdateAll.sh"
         exit 1
     fi
 
-FILE="/opt/killbot/renew_wildcard.sh"
-    kb_download "$FILE" "sh/renew_wildcard.sh"
-    
-    if [ $? -eq 0 ]; then
-        echo "The renew_wildcard.sh file has been successfully loaded."
-    else
-        echo "Error loading the renew_wildcard.sh file."
-        exit 1
-    fi
-
-FILE="/opt/killbot/acme_check_api.sh"
-    kb_download "$FILE" "sh/acme_check_api.sh"
-    
-    if [ $? -eq 0 ]; then
-        echo "The acme_check_api.sh file has been successfully loaded."
-    else
-        echo "Error loading the acme_check_api.sh file."
-        exit 1
-    fi
-
 FILE="/opt/killbot/official_allowed_ips.sh"
     kb_download "$FILE" "sh/official_allowed_ips.sh"
     
@@ -1261,6 +1137,16 @@ FILE="/opt/killbot/official_allowed_ips.sh"
         echo "The official_allowed_ips.sh file has been successfully loaded."
     else
         echo "Error loading the official_allowed_ips.sh file."
+        exit 1
+    fi
+
+FILE="/opt/killbot/renew_wildcard.sh"
+    kb_download "$FILE" "sh/renew_wildcard.sh"
+
+    if [ $? -eq 0 ]; then
+        echo "The renew_wildcard.sh file has been successfully loaded."
+    else
+        echo "Error loading the renew_wildcard.sh file."
         exit 1
     fi
 
@@ -1461,10 +1347,13 @@ FILE="/opt/killbot/dns_provider_hint.sh"
     fi
 
 sudo chmod +x /opt/killbot/check_killbot_reverse_proxy.sh /opt/killbot/setup_killbot_reverse_proxy.sh /opt/killbot/update-postrouting.sh /opt/killbot/update-symmetric-ip.sh /opt/killbot/check_host_curl.sh /opt/killbot/read_apache_log.sh
+sudo chown root:root /opt/killbot/check_host_curl.sh /opt/killbot/read_apache_log.sh
+sudo chmod 755 /opt/killbot/check_host_curl.sh /opt/killbot/read_apache_log.sh
 sudo chmod 644 /opt/killbot/dns_provider_hint.sh
 
 sudo chown www-data:www-data /opt/killbot/html/FakeBot.php /opt/killbot/html/BlockBot.html /opt/killbot/html/Expired.html /opt/killbot/html/verification.php /opt/killbot/html/verification_options.php
-sudo chmod +x /opt/killbot/f2b/subnet-monitor.sh /opt/killbot/renew_wildcard.sh /opt/killbot/acme_check_api.sh /opt/killbot/UpdateAll.sh /opt/killbot/official_allowed_ips.sh
+sudo chmod +x /opt/killbot/f2b/subnet-monitor.sh /opt/killbot/UpdateAll.sh /opt/killbot/official_allowed_ips.sh /opt/killbot/renew_wildcard.sh
+rm -f /opt/killbot/acme_check_api.sh /etc/cron.d/killbot-wildcard-renewal
 sudo chmod +x /opt/killbot/cert_delete.sh /opt/killbot/f2b/block_all_countries_except.sh /opt/killbot/f2b/check_apache_and_block.sh /opt/killbot/f2b/unblock_traffic.sh
 
 sudo tee /opt/killbot/kbEqual.php > /dev/null <<EOF
@@ -1513,6 +1402,27 @@ function log_message(message,domain)
         f:write(message .. "\n")
         f:close()
     end
+end
+
+-- POSIX shell quoting. Lua %q is not shell-safe ($(...) still runs inside double quotes).
+local function sh_quote(s)
+    s = tostring(s or "")
+    return "'" .. string.gsub(s, "'", "'\\\\''") .. "'"
+end
+
+local function run_php_cli(script, xff, ip, ua, host)
+    local cmd = "KB_CLI_XFF=" .. sh_quote(xff) ..
+        " KB_CLI_IP=" .. sh_quote(ip) ..
+        " KB_CLI_UA=" .. sh_quote(ua) ..
+        " KB_CLI_HOST=" .. sh_quote(host) ..
+        " php " .. sh_quote(script)
+    local handle = io.popen(cmd)
+    if not handle then
+        return ""
+    end
+    local result = handle:read("*a")
+    handle:close()
+    return result or ""
 end
 
 kb_lua_agents
@@ -1630,7 +1540,11 @@ end
 function get_hostname_ips(hostname)
     local ips = {}
 
-    local cmd = "dig +short @" .. DNS_SERVER .. " " .. hostname .. " 2>/dev/null | grep -E '^[0-9]+\\\.[0-9]+\\\.[0-9]+\\\.[0-9]+$'"
+    if not hostname or hostname == "" or hostname:find("[^%w%.%-]") then
+        return ips
+    end
+
+    local cmd = "dig +short @" .. DNS_SERVER .. " " .. sh_quote(hostname) .. " 2>/dev/null | grep -E '^[0-9]+\\\.[0-9]+\\\.[0-9]+\\\.[0-9]+$'"
     local handle = io.popen(cmd)
     if handle then
         local result = handle:read("*a")
@@ -1642,7 +1556,7 @@ function get_hostname_ips(hostname)
     end
 
     if #ips == 0 then
-        local cmd = "nslookup " .. hostname .. " " .. DNS_SERVER .. " 2>/dev/null | grep 'Address: ' | grep -v '#'"
+        local cmd = "nslookup " .. sh_quote(hostname) .. " " .. DNS_SERVER .. " 2>/dev/null | grep 'Address: ' | grep -v '#'"
         local handle = io.popen(cmd)
         if handle then
             local result = handle:read("*a")
@@ -1937,22 +1851,21 @@ end
     end
 
     local hostname = ""
-    local handle = io.popen("host " .. remote_addr_org)
-    if handle then
-        local result = handle:read("*a")
-        handle:close()
-        if result then
-            hostname = string.match(result, "domain name pointer ([^%s]+)%.") or ""
+    if remote_addr_org:match("^%d+%.%d+%.%d+%.%d+$") then
+        local handle = io.popen("host " .. sh_quote(remote_addr_org))
+        if handle then
+            local result = handle:read("*a")
+            handle:close()
+            if result then
+                hostname = string.match(result, "domain name pointer ([^%s]+)%.") or ""
+            end
         end
     end
 
     local is_real_bot = check_hostname(hostname, user_agent, remote_addr_org)
     
     if is_real_bot == "bot_false" then
-        local cmd = string.format('php /opt/killbot/html/FakeBot.php %q %q %q', x_forwarded_for ,remote_addr_org,user_agent)
-        local handle = io.popen(cmd)
-        local result = handle:read("*a")
-        handle:close()
+        local result = run_php_cli("/opt/killbot/html/FakeBot.php", x_forwarded_for, remote_addr_org, user_agent, http_host)
         r.content_type = "text/html"
         r:puts(result)
 
@@ -1980,10 +1893,7 @@ end
 --          r.content_type = "text/html"
 --          r:sendfile(r.filename)
 
-            local cmd = string.format('php /opt/killbot/html/verification.php %q %q %q %q', x_forwarded_for ,remote_addr_org,user_agent, http_host)
-            local handle = io.popen(cmd)
-            local result = handle:read("*a")
-            handle:close()
+            local result = run_php_cli("/opt/killbot/html/verification.php", x_forwarded_for, remote_addr_org, user_agent, http_host)
             r.content_type = "text/html"
             r:puts(result)
 
@@ -2043,11 +1953,7 @@ end
             log_message("ip:"  .. remote_addr_org .. " computed computed_hash == expected_hash: " .. computed_hash .. " DECLINED",http_host)
             return apache2.DECLINED
         else    
-            --local handle = io.popen("php /opt/killbot/html/verification.php")
-            local cmd = string.format('php /opt/killbot/html/verification.php %q %q %q %q', x_forwarded_for ,remote_addr_org, user_agent, http_host)
-            local handle = io.popen(cmd)
-            local result = handle:read("*a")
-            handle:close()
+            local result = run_php_cli("/opt/killbot/html/verification.php", x_forwarded_for, remote_addr_org, user_agent, http_host)
             r.content_type = "text/html"
             r:puts(result)
 
@@ -2060,6 +1966,151 @@ end
 
 EOF
 
+
+sudo tee /opt/killbot/nginx_custom.conf > /dev/null <<'EOF'
+# Per-site KillBot proxy options.
+# Copy to /opt/killbot/settings/{domain}/nginx_custom.conf and uncomment
+# lines to override defaults for that site. install.sh does not overwrite
+# the per-site file. Unknown or invalid lines are ignored.
+#
+# Defaults when the per-site file is missing (current KillBot behavior):
+#   Header unset X-Frame-Options
+#   SSLProxyCheckPeerCN Off
+#   SSLProxyCheckPeerName Off
+#   SSLProxyCheckPeerExpire Off
+#   proxy_ssl_verify off
+#   ModSecurity CRS is not included
+
+# IncludeOptional /usr/share/modsecurity-crs/*.load
+
+# Header unset X-Frame-Options
+# Header unset X-Frame-Options Off
+
+# SSLProxyCheckPeerCN Off
+# SSLProxyCheckPeerName Off
+# SSLProxyCheckPeerExpire Off
+
+# proxy_ssl_verify off;
+EOF
+sudo chmod 644 /opt/killbot/nginx_custom.conf
+
+sudo tee /opt/killbot/load_nginx_custom_conf.sh > /dev/null <<'EOF'
+#!/bin/bash
+# Load /opt/killbot/settings/{domain}/nginx_custom.conf without source/eval.
+
+kb_norm_onoff() {
+    local v="${1:-}"
+    v="${v%;}"
+    v="${v,,}"
+    case "$v" in
+        on) echo On ;;
+        off) echo Off ;;
+        *) echo "" ;;
+    esac
+}
+
+kb_norm_onoff_ngx() {
+    local v="${1:-}"
+    v="${v%;}"
+    v="${v,,}"
+    case "$v" in
+        on) echo on ;;
+        off) echo off ;;
+        *) echo "" ;;
+    esac
+}
+
+load_nginx_custom_conf() {
+    local domain="${1:-}"
+    KB_Header_unset_X_Frame_Options=1
+    KB_SSLProxyCheckPeerCN=Off
+    KB_SSLProxyCheckPeerName=Off
+    KB_SSLProxyCheckPeerExpire=Off
+    KB_proxy_ssl_verify=off
+    KB_IncludeOptional_modsecurity_crs=0
+
+    local conf="/opt/killbot/settings/${domain}/nginx_custom.conf"
+    if [[ -z "$domain" || ! -f "$conf" || ! -r "$conf" ]]; then
+        return 0
+    fi
+
+    local line trimmed key val n
+    while IFS= read -r line || [[ -n "$line" ]]; do
+        line="${line%$'\r'}"
+        trimmed="${line#"${line%%[![:space:]]*}"}"
+        trimmed="${trimmed%"${trimmed##*[![:space:]]}"}"
+        [[ -z "$trimmed" ]] && continue
+        [[ "$trimmed" =~ ^# ]] && continue
+
+        if [[ "$trimmed" == "IncludeOptional /usr/share/modsecurity-crs/*.load" || "$trimmed" == "IncludeOptional /usr/share/modsecurity-crs/*.load;" ]]; then
+            KB_IncludeOptional_modsecurity_crs=1
+            continue
+        fi
+
+        if [[ "$trimmed" =~ ^Header[[:space:]]+unset[[:space:]]+X-Frame-Options(.*)$ ]]; then
+            val="${BASH_REMATCH[1]}"
+            val="${val#"${val%%[![:space:]]*}"}"
+            val="${val%;}"
+            if [[ -z "$val" ]]; then
+                KB_Header_unset_X_Frame_Options=1
+                continue
+            fi
+            n="$(kb_norm_onoff "$val")"
+            if [[ "$n" == "On" ]]; then
+                KB_Header_unset_X_Frame_Options=1
+            elif [[ "$n" == "Off" ]]; then
+                KB_Header_unset_X_Frame_Options=0
+            else
+                echo "nginx_custom.conf: ignored invalid Header unset X-Frame-Options value: $val" >&2
+            fi
+            continue
+        fi
+
+        if [[ "$trimmed" =~ ^SSLProxyCheckPeerCN[[:space:]]+([^[:space:]]+)\;?$ ]]; then
+            n="$(kb_norm_onoff "${BASH_REMATCH[1]}")"
+            if [[ -n "$n" ]]; then
+                KB_SSLProxyCheckPeerCN="$n"
+            else
+                echo "nginx_custom.conf: ignored invalid SSLProxyCheckPeerCN value: ${BASH_REMATCH[1]}" >&2
+            fi
+            continue
+        fi
+
+        if [[ "$trimmed" =~ ^SSLProxyCheckPeerName[[:space:]]+([^[:space:]]+)\;?$ ]]; then
+            n="$(kb_norm_onoff "${BASH_REMATCH[1]}")"
+            if [[ -n "$n" ]]; then
+                KB_SSLProxyCheckPeerName="$n"
+            else
+                echo "nginx_custom.conf: ignored invalid SSLProxyCheckPeerName value: ${BASH_REMATCH[1]}" >&2
+            fi
+            continue
+        fi
+
+        if [[ "$trimmed" =~ ^SSLProxyCheckPeerExpire[[:space:]]+([^[:space:]]+)\;?$ ]]; then
+            n="$(kb_norm_onoff "${BASH_REMATCH[1]}")"
+            if [[ -n "$n" ]]; then
+                KB_SSLProxyCheckPeerExpire="$n"
+            else
+                echo "nginx_custom.conf: ignored invalid SSLProxyCheckPeerExpire value: ${BASH_REMATCH[1]}" >&2
+            fi
+            continue
+        fi
+
+        if [[ "$trimmed" =~ ^proxy_ssl_verify[[:space:]]+([^[:space:]]+)\;?$ ]]; then
+            n="$(kb_norm_onoff_ngx "${BASH_REMATCH[1]}")"
+            if [[ -n "$n" ]]; then
+                KB_proxy_ssl_verify="$n"
+            else
+                echo "nginx_custom.conf: ignored invalid proxy_ssl_verify value: ${BASH_REMATCH[1]}" >&2
+            fi
+            continue
+        fi
+
+        echo "nginx_custom.conf: ignored unknown line: $trimmed" >&2
+    done < "$conf"
+}
+EOF
+sudo chmod 644 /opt/killbot/load_nginx_custom_conf.sh
 
 sudo sudo tee /opt/killbot/apache443-killbot.sh > /dev/null <<EOF
 #!/bin/bash
@@ -2091,6 +2142,18 @@ fi
 
 if [[ "\$cdn_static" == "2" ]] && [[ -n "\$cdn_domain" ]]; then
     cdn_domain_no_https=\$(echo "\$cdn_domain" | sed -E 's#^https?://##; s#/.*##')
+fi
+
+KB_Header_unset_X_Frame_Options=1
+KB_SSLProxyCheckPeerCN=Off
+KB_SSLProxyCheckPeerName=Off
+KB_SSLProxyCheckPeerExpire=Off
+KB_proxy_ssl_verify=off
+KB_IncludeOptional_modsecurity_crs=0
+if [[ -f /opt/killbot/load_nginx_custom_conf.sh ]]; then
+    # shellcheck disable=SC1091
+    . /opt/killbot/load_nginx_custom_conf.sh
+    load_nginx_custom_conf "\$domain"
 fi
 
 nginXConfigFile="/etc/nginx/sites-available/\$domain.conf"
@@ -2153,7 +2216,7 @@ server {
 nginXconfigContent+="
         proxy_ssl_server_name on;
         proxy_ssl_name \\\$host;
-        proxy_ssl_verify off;
+        proxy_ssl_verify \$KB_proxy_ssl_verify;
 ";
 
 if [  -n "\$cdn_domain" ] && [ \${#cdn_paths_array[@]} -gt 0 ]; then
@@ -2322,9 +2385,9 @@ configContent="<VirtualHost 127.0.0.1:8443>
 if [[ "\$https" == "https" ]]; then 
     configContent+="
             SSLProxyEngine On 
-            SSLProxyCheckPeerCN Off
-            SSLProxyCheckPeerName Off
-            SSLProxyCheckPeerExpire Off
+            SSLProxyCheckPeerCN \$KB_SSLProxyCheckPeerCN
+            SSLProxyCheckPeerName \$KB_SSLProxyCheckPeerName
+            SSLProxyCheckPeerExpire \$KB_SSLProxyCheckPeerExpire
     "
 fi
 
@@ -2348,10 +2411,20 @@ configContent+="
         #RewriteRule .* - [E=SERVER_REMOTE_ADDR:%{REMOTE_ADDR}]
         #RequestHeader append X-Forwarded-For \"%{SERVER_REMOTE_ADDR}e\"
 
+"
+if [[ "\$KB_Header_unset_X_Frame_Options" == "1" ]]; then
+    configContent+="
         Header unset X-Frame-Options
-
+"
+fi
+if [[ "\$KB_IncludeOptional_modsecurity_crs" == "1" ]]; then
+    configContent+="
+        IncludeOptional /usr/share/modsecurity-crs/*.load
+"
+fi
+configContent+="
         #RequestHeader set Host \"\$main_domain\"
-"       
+"        
 
 if [[ -n "\$cdn_domain_no_https" ]]; then
     # Check CDN domain availability
@@ -2469,7 +2542,7 @@ server {
 
         proxy_ssl_server_name on;
         proxy_ssl_name \\\$host;
-        proxy_ssl_verify off;
+        proxy_ssl_verify \$KB_proxy_ssl_verify;
 
         proxy_http_version 1.1;
         proxy_set_header Connection '';
@@ -2583,6 +2656,17 @@ secondary_domain=\$3
 backend_ip=\$4
 https=\$5
 
+KB_Header_unset_X_Frame_Options=1
+KB_SSLProxyCheckPeerCN=Off
+KB_SSLProxyCheckPeerName=Off
+KB_SSLProxyCheckPeerExpire=Off
+KB_proxy_ssl_verify=off
+KB_IncludeOptional_modsecurity_crs=0
+if [[ -f /opt/killbot/load_nginx_custom_conf.sh ]]; then
+    # shellcheck disable=SC1091
+    . /opt/killbot/load_nginx_custom_conf.sh
+    load_nginx_custom_conf "\$domain"
+fi
 
 configFile="/etc/apache2/sites-available/\$domain.conf"
 
@@ -2663,9 +2747,9 @@ configContent="<VirtualHost 127.0.0.1:8443>
 if [[ "\$https" == "https" ]]; then 
         configContent+="
         SSLProxyEngine On 
-        SSLProxyCheckPeerCN Off
-        SSLProxyCheckPeerName Off
-        SSLProxyCheckPeerExpire Off
+        SSLProxyCheckPeerCN \$KB_SSLProxyCheckPeerCN
+        SSLProxyCheckPeerName \$KB_SSLProxyCheckPeerName
+        SSLProxyCheckPeerExpire \$KB_SSLProxyCheckPeerExpire
 "
 fi
 
@@ -2686,8 +2770,18 @@ configContent+="
         #RewriteRule .* - [E=SERVER_REMOTE_ADDR:%{REMOTE_ADDR}]
         #RequestHeader append X-Forwarded-For "%{SERVER_REMOTE_ADDR}e"
 
+"
+if [[ "\$KB_Header_unset_X_Frame_Options" == "1" ]]; then
+        configContent+="
         Header unset X-Frame-Options
-
+"
+fi
+if [[ "\$KB_IncludeOptional_modsecurity_crs" == "1" ]]; then
+        configContent+="
+        IncludeOptional /usr/share/modsecurity-crs/*.load
+"
+fi
+configContent+="
         #RequestHeader set Host "\$main_domain"
 
         ProxyPass / \$https://\$backend_ip/ nocanon
@@ -3249,6 +3343,12 @@ fi
 sudo tee /opt/killbot/install.sh > /dev/null <<EOF
 #!/bin/bash
 
+KB_SETTINGS="/opt/killbot/settings.php"
+if [[ -f "\$KB_SETTINGS" ]] && grep -E '^[[:space:]]*\\\$kb_allow_install_sh[[:space:]]*=' "\$KB_SETTINGS" | grep -Eq '=[[:space:]]*(false|FALSE|0)[[:space:]]*;'; then
+    echo "ERROR: site configuration via install.sh is disabled in /opt/killbot/settings.php (kb_allow_install_sh = false)" >&2
+    exit 1
+fi
+
 require_kb_status() {
     if [[ "\${KB_STATUS_CHECKED:-0}" == "1" ]]; then
         return 0
@@ -3299,11 +3399,6 @@ echo "DNS server: \$DNS_LE_SERVER"
 
 declare DNSServer="\$DNS_LE_SERVER"
 
-# DNS API configuration for wildcard SSL certificates
-declare use_sub_domains="0"
-declare api_env_content=""
-declare dns_provider=""
-
 while [[ "\$#" -gt 0 ]]; do
     if [[ -z "\$1" ]]; then
         break
@@ -3337,13 +3432,6 @@ while [[ "\$#" -gt 0 ]]; do
             le="\$2"; shift 2;;
         -www)
             www="\$2"; shift 2;;
-        # DNS API configuration
-        -use_sub_domains)
-            use_sub_domains="\$2"; shift 2;;
-        -api_env_content)
-            api_env_content="\$2"; shift 2;;
-        -dns_provider)
-            dns_provider="\$2"; shift 2;;
         *)
             trimmed="\$(echo -n "\$1" | xargs)"
             [[ -n "\$trimmed" ]] && { echo "Unknown arg: '\$1'"; exit 1; } || shift 1
@@ -3783,56 +3871,6 @@ if [[ "\$enabled_value" != "0" ]]; then
 fi
 
 
-# Create DNS API configuration for wildcard SSL certificates
-if [[ "\$use_sub_domains" == "1" && -n "\$api_env_content" ]]; then
-    echo "Creating DNS API configuration for wildcard SSL certificates..."
-    
-    # Create directory for domain certificates
-    sudo mkdir -p "/opt/killbot/certs/\$domain_without_www"
-    sudo chown -R www-data:www-data "/opt/killbot/certs/\$domain_without_www"
-    sudo chmod -R 755 "/opt/killbot/certs/\$domain_without_www"
-    
-    # Create api.env file with provided content
-    api_env_file="/opt/killbot/certs/\$domain_without_www/api.env"
-    enabled_file="/opt/killbot/certs/\$domain_without_www/enabled"
-    
-    # Decode base64 content and write to file
-    echo "\$api_env_content" | base64 -d > "\$api_env_file"
-    
-    # Set proper permissions for api.env file
-    sudo chown www-data:www-data "\$api_env_file"
-    sudo chmod 600 "\$api_env_file"
-    
-    # Remove enabled file when api.env is created/updated (new credentials available)
-    if [[ -f "\$enabled_file" ]]; then
-        rm -f "\$enabled_file"
-        log "Removed enabled file for \$domain_without_www - new credentials available"
-    fi
-    
-    # Create provider file with DNS provider name
-    if [[ -n "\$dns_provider" ]]; then
-        provider_file="/opt/killbot/certs/\$domain_without_www/provider"
-        echo "\$dns_provider" > "\$provider_file"
-        
-        # Set proper permissions for provider file
-        sudo chown www-data:www-data "\$provider_file"
-        sudo chmod 644 "\$provider_file"
-        
-        echo "Created provider file: \$provider_file with content: \$dns_provider"
-    fi
-    
-    echo "Running DNS API check for \$api_env_file ..."
-    if /opt/killbot/acme_check_api.sh "\$api_env_file"; then
-      echo "DNS API check passed, continuing..."
-    else
-      echo "DNS API check failed for \$api_env_file"
-      exit 1
-    fi
-
-    echo "DNS API configuration created at: \$api_env_file"
-fi
-
-
 #sudo systemctl reload apache2
 
 lang="ru"
@@ -4137,35 +4175,45 @@ EOF
 
 sudo chmod +x /opt/killbot/install.sh
 
+# Web config runs these via kb.php as www-data. Do not allow www-data to replace them.
+chown root:root /opt/killbot/install.sh /opt/killbot/check_host_curl.sh /opt/killbot/read_apache_log.sh /etc/init.d/kb
+chmod 755 /opt/killbot/install.sh /opt/killbot/check_host_curl.sh /opt/killbot/read_apache_log.sh /etc/init.d/kb
 
-# Allow configure KillBot via php
-RULE="www-data ALL=(ALL) NOPASSWD: /etc/init.d/kb"
-SUDOERS_FILE="/etc/sudoers"
-if sudo grep -Fxq "$RULE" "$SUDOERS_FILE"; then
-    :
-else    
-    echo "$RULE" | sudo tee -a "$SUDOERS_FILE" > /dev/null    
+# Drop /usr/bin/nice from sudoers (sudo nice = arbitrary root). Keep install.sh, kb, checkers.
+SUDOERS_DROP=(
+    "www-data ALL=(ALL) NOPASSWD: /usr/bin/nice, /opt/killbot/install.sh"
+    "www-data ALL=(ALL) NOPASSWD: /etc/init.d/kb"
+    "www-data ALL=(ALL) NOPASSWD: /opt/killbot/install.sh"
+    "www-data ALL=(ALL) NOPASSWD: /opt/killbot/check_host_curl.sh"
+    "www-data ALL=(ALL) NOPASSWD: /opt/killbot/read_apache_log.sh"
+)
+SUDOERS_TMP="$(mktemp)"
+grep -Fxv -f <(printf '%s\n' "${SUDOERS_DROP[@]}") /etc/sudoers > "$SUDOERS_TMP" || true
+if visudo -c -f "$SUDOERS_TMP" >/dev/null 2>&1; then
+    cat "$SUDOERS_TMP" > /etc/sudoers
+    chmod 440 /etc/sudoers
+else
+    echo "ERROR: sudoers cleanup failed validation; /etc/sudoers left unchanged" >&2
+    rm -f "$SUDOERS_TMP"
+    exit 1
 fi
-RULE="www-data ALL=(ALL) NOPASSWD: /usr/bin/nice, /opt/killbot/install.sh"
-SUDOERS_FILE="/etc/sudoers"
-if sudo grep -Fxq "$RULE" "$SUDOERS_FILE"; then
-    :
-else    
-    echo "$RULE" | sudo tee -a "$SUDOERS_FILE" > /dev/null    
-fi
-RULE="www-data ALL=(ALL) NOPASSWD: /opt/killbot/check_host_curl.sh"
-SUDOERS_FILE="/etc/sudoers"
-if sudo grep -Fxq "$RULE" "$SUDOERS_FILE"; then
-    :
-else    
-    echo "$RULE" | sudo tee -a "$SUDOERS_FILE" > /dev/null    
-fi
-RULE="www-data ALL=(ALL) NOPASSWD: /opt/killbot/read_apache_log.sh"
-SUDOERS_FILE="/etc/sudoers"
-if sudo grep -Fxq "$RULE" "$SUDOERS_FILE"; then
-    :
-else    
-    echo "$RULE" | sudo tee -a "$SUDOERS_FILE" > /dev/null    
+rm -f "$SUDOERS_TMP"
+
+cat > /etc/sudoers.d/killbot <<'EOF'
+www-data ALL=(ALL) NOPASSWD: /opt/killbot/install.sh
+www-data ALL=(ALL) NOPASSWD: /opt/killbot/check_host_curl.sh
+www-data ALL=(ALL) NOPASSWD: /opt/killbot/read_apache_log.sh
+www-data ALL=(ALL) NOPASSWD: /etc/init.d/kb ensite *
+www-data ALL=(ALL) NOPASSWD: /etc/init.d/kb ensite * p
+www-data ALL=(ALL) NOPASSWD: /etc/init.d/kb dissite *
+www-data ALL=(ALL) NOPASSWD: /etc/init.d/kb a2dissite *
+www-data ALL=(ALL) NOPASSWD: /etc/init.d/kb cert_del *
+www-data ALL=(ALL) NOPASSWD: /etc/init.d/kb remove *
+EOF
+chmod 440 /etc/sudoers.d/killbot
+if ! visudo -c >/dev/null 2>&1; then
+    echo "ERROR: sudoers validation failed after writing /etc/sudoers.d/killbot" >&2
+    exit 1
 fi
 
 
@@ -4201,6 +4249,21 @@ if [ ! -f "\$FILE" ]; then
 else
     echo "Keep existing verification options: \$FILE"
 fi
+
+FILE="/opt/killbot/settings.php"
+if [ ! -f "\$FILE" ]; then
+    kb_download "\$FILE" "settings.php"
+    if [ \$? -eq 0 ]; then
+        echo "Created /opt/killbot/settings.php"
+    else
+        echo "Error loading settings.php"
+        exit 1
+    fi
+else
+    echo "Keep existing settings: \$FILE"
+fi
+sudo chown root:root /opt/killbot/settings.php
+sudo chmod 644 /opt/killbot/settings.php
 
     #sudo test -f /var/www/html/.htaccess || sudo tee /var/www/html/.htaccess > /dev/null <<EOF
     #<FilesMatch "\.(html|htm)$">
@@ -4289,26 +4352,6 @@ FILE="/opt/killbot/UpdateAll.sh"
         exit 1
     fi
 
-FILE="/opt/killbot/renew_wildcard.sh"
-    kb_download "\$FILE" "sh/renew_wildcard.sh"
-    
-    if [ \$? -eq 0 ]; then
-        echo "The renew_wildcard.sh file has been successfully loaded."
-    else
-        echo "Error loading the renew_wildcard.sh file."
-        exit 1
-    fi
-
-FILE="/opt/killbot/acme_check_api.sh"
-    kb_download "\$FILE" "sh/acme_check_api.sh"
-    
-    if [ \$? -eq 0 ]; then
-        echo "The acme_check_api.sh file has been successfully loaded."
-    else
-        echo "Error loading the acme_check_api.sh file."
-        exit 1
-    fi
-
 FILE="/opt/killbot/official_allowed_ips.sh"
     kb_download "\$FILE" "sh/official_allowed_ips.sh"
     
@@ -4316,6 +4359,16 @@ FILE="/opt/killbot/official_allowed_ips.sh"
         echo "The official_allowed_ips.sh file has been successfully loaded."
     else
         echo "Error loading the official_allowed_ips.sh file."
+        exit 1
+    fi
+
+FILE="/opt/killbot/renew_wildcard.sh"
+    kb_download "\$FILE" "sh/renew_wildcard.sh"
+
+    if [ \$? -eq 0 ]; then
+        echo "The renew_wildcard.sh file has been successfully loaded."
+    else
+        echo "Error loading the renew_wildcard.sh file."
         exit 1
     fi
 
@@ -4465,7 +4518,10 @@ FILE="/opt/killbot/read_apache_log.sh"
     fi
 
 sudo chmod +x /opt/killbot/check_killbot_reverse_proxy.sh /opt/killbot/setup_killbot_reverse_proxy.sh /opt/killbot/update-postrouting.sh /opt/killbot/update-symmetric-ip.sh /opt/killbot/check_host_curl.sh /opt/killbot/read_apache_log.sh
-sudo chmod +x /opt/killbot/f2b/subnet-monitor.sh  /opt/killbot/renew_wildcard.sh /opt/killbot/cert_delete.sh /opt/killbot/acme_check_api.sh /opt/killbot/on_killbot_protection.sh /opt/killbot/off_killbot_protection.sh /opt/killbot/official_allowed_ips.sh /opt/killbot/cert_wildcard_new.sh /opt/killbot/clean_up_unused_certs.sh /opt/killbot/UpdateAll.sh
+sudo chown root:root /opt/killbot/check_host_curl.sh /opt/killbot/read_apache_log.sh /opt/killbot/install.sh /etc/init.d/kb 2>/dev/null || true
+sudo chmod 755 /opt/killbot/check_host_curl.sh /opt/killbot/read_apache_log.sh /opt/killbot/install.sh /etc/init.d/kb 2>/dev/null || true
+sudo chmod +x /opt/killbot/f2b/subnet-monitor.sh /opt/killbot/cert_delete.sh /opt/killbot/on_killbot_protection.sh /opt/killbot/off_killbot_protection.sh /opt/killbot/official_allowed_ips.sh /opt/killbot/cert_wildcard_new.sh /opt/killbot/clean_up_unused_certs.sh /opt/killbot/UpdateAll.sh /opt/killbot/renew_wildcard.sh
+rm -f /opt/killbot/acme_check_api.sh /etc/cron.d/killbot-wildcard-renewal
 sudo chmod +x  /opt/killbot/f2b/block_all_countries_except.sh  /opt/killbot/f2b/check_apache_and_block.sh  /opt/killbot/f2b/unblock_traffic.sh /opt/killbot/official_allowed_ips.sh
 
 EOF
@@ -4598,26 +4654,10 @@ fi
 
 # Path to configuration file
 MODSEC_DIR="/etc/modsecurity"
-MODSEC_FILE="${MODSEC_DIR}/killbot-bots.conf"
 
 # Create /etc/modsecurity directory if it doesn't exist
 sudo mkdir -p "$MODSEC_DIR"
-
-# Create configuration file to prevent large number of bot visits /etc/modsecurity/killbot.conf
-sudo tee "$MODSEC_FILE" > /dev/null <<EOL
-# Enable request processing
-SecRuleEngine On
-
-SecAction "id:1001,phase:1,pass,nolog,setvar:tx.kbRes_counter=0"
-
-SecRule REQUEST_COOKIES "kbRes=true" \
-    "id:1002,phase:2,pass,nolog,setvar:tx.kbRes_counter=+1"
-
-# Check if counter exceeds limit
-SecRule TX:kbRes_counter "@gt $MAX_CONNECTIONS_BOTS" \
-    "id:1003,phase:2,deny,status:302,redirect:/BlockBot.html,msg:'Bot connection limit exceeded'"
-EOL
-
+sudo rm -f "${MODSEC_DIR}/killbot-ip.conf" "${MODSEC_DIR}/killbot-bots.conf"
 
 MODSEC_FILE="${MODSEC_DIR}/killbot-slow.conf"
 # Create configuration file to prevent slow connections /etc/modsecurity/killbot-slow.conf
@@ -4633,25 +4673,6 @@ SecRule REQUEST_URI "@streq /opt/killbot/verification.php" \
 SecRule TX:START_TIME "@lt %{TIME}-5" \
     "id:2002,phase:4,deny,status:408,msg:'Slow request detected',log,chain"
 SecRule REQUEST_URI "@streq /opt/killbot/verification.php"
-EOL
-
-MODSEC_FILE="${MODSEC_DIR}/killbot-ip.conf"
-# Create configuration file for multiple requests to verification.php /etc/modsecurity/killbot-ip.conf
-sudo tee "$MODSEC_FILE" > /dev/null <<EOL
-# Enable request processing
-SecRuleEngine On
-
-# Initialize counter only for /opt/killbot/verification.php
-SecRule REQUEST_URI "@streq /opt/killbot/verification.php" \
-    "id:3001,phase:1,pass,nolog,initcol:ip=%{REMOTE_ADDR}"
-
-# Increment request counter for current IP
-SecRule REQUEST_URI "@streq /opt/killbot/verification.php" \
-    "id:3002,phase:2,pass,nolog,setvar:ip.requests=+1"
-
-# Check if request count exceeds limit (MAX_CONNECTIONS_IP_VP)
-SecRule IP:REQUESTS "@gt $MAX_CONNECTIONS_IP_VP" \
-    "id:3003,phase:2,deny,status:429,msg:'Too many requests from this IP',log"
 EOL
 
 
@@ -4871,39 +4892,19 @@ sudo tee /var/www/html/kb.php > /dev/null <<EOF
     '45.157.160.212'
 ];
 
-// Parse IP addresses from the X-Forwarded-For header
-function parseXForwardedFor(\$xff) {
-    \$ips = [];
-    if (!empty(\$xff)) {
-        // Split by comma and trim spaces
-        \$xffIps = array_map('trim', explode(',', \$xff));
-        foreach (\$xffIps as \$ip) {
-            // Validate that it is an IP (optional)
-            if (filter_var(\$ip, FILTER_VALIDATE_IP)) {
-                \$ips[] = \$ip;
-            }
-        }
+function kb_sanitize(\$value) {
+    if (\$value === null) {
+        return null;
     }
-    return \$ips;
+    \$value = str_replace("\0", '', (string) \$value);
+    \$value = preg_replace('/[\x00-\x1F\x7F]/', '', \$value);
+    \$value = preg_replace('/[^a-zA-Z0-9 .,:@_\/+\-=()\[\]#?&%]/', '', \$value);
+    return \$value;
 }
 
-// Collect all IPs into an array
-\$serverIps = [\$_SERVER['REMOTE_ADDR']];
-
-// Append IPs from X-Forwarded-For if present
-if (isset(\$_SERVER['HTTP_X_FORWARDED_FOR'])) {
-    \$xffIps = parseXForwardedFor(\$_SERVER['HTTP_X_FORWARDED_FOR']);
-    \$serverIps = array_merge(\$serverIps, \$xffIps);
-}
-
-// If X-Forwarded-For is missing, add localhost for backward compatibility
-if (count(\$serverIps) === 1) {
-    \$serverIps[] = '127.0.0.1';
-}
-
-// Access check
-if (count(array_intersect(\$serverIps, \$allowedIps)) == 0) { 
-    echo "Access denied: Your IP = " . \$_SERVER['REMOTE_ADDR'] . " is not allowed to configure KillBot DNS Server.";
+\$remoteIp = \$_SERVER['REMOTE_ADDR'] ?? '';
+if (!in_array(\$remoteIp, \$allowedIps, true)) {
+    echo "Access denied: Your IP = " . \$remoteIp . " is not allowed to configure KillBot DNS Server.";
     exit;
 }
 
@@ -4911,7 +4912,7 @@ if (is_array(\$_POST) && (count(\$_POST) > 0)) {
     \$_GET = \$_POST;
 }
 
-\$type = \$_GET["type"] ?? null;
+\$type = kb_sanitize(\$_GET["type"] ?? null);
 if (!\$type) {
     echo "no type arg"; 
     exit;
@@ -4922,32 +4923,27 @@ if (\$type=="v"){
     exit;
 }
 
-\$domain = \$_GET["domain"] ?? null;
-\$cdn_domain = \$_GET["cdn_domain"] ?? null;
-\$cdn_paths = \$_GET["cdn_paths"] ?? null;
-\$cdn_static = \$_GET["cdn_static"] ?? null;
-\$email = \$_GET["email"] ?? null;
-\$ip = \$_GET["ip"] ?? null;
-\$folder = \$_GET["folder"] ?? null;
-\$wlip = \$_GET["wlip"] ?? "";
-\$wlua = \$_GET["wlua"] ?? "";
-\$dns_bots_allowed = isset(\$_GET["dns_bots_allowed"])?base64_decode(\$_GET["dns_bots_allowed"]):"";
-\$wlpath = \$_GET["wlpath"] ?? "";
-\$t = \$_GET["t"] ?? null;
-\$le = \$_GET["le"] ?? "1";
-\$www = \$_GET["www"] ?? "0";
-\$https = \$_GET["https"] ?? "https";
-\$protocol = \$_GET["protocol"] ?? null;
+\$domain = kb_sanitize(\$_GET["domain"] ?? null);
+\$cdn_domain = kb_sanitize(\$_GET["cdn_domain"] ?? null);
+\$cdn_paths = kb_sanitize(\$_GET["cdn_paths"] ?? null);
+\$cdn_static = kb_sanitize(\$_GET["cdn_static"] ?? null);
+\$email = kb_sanitize(\$_GET["email"] ?? null);
+\$ip = kb_sanitize(\$_GET["ip"] ?? null);
+\$folder = kb_sanitize(\$_GET["folder"] ?? null);
+\$wlip = kb_sanitize(\$_GET["wlip"] ?? "") ?? "";
+\$wlua = kb_sanitize(\$_GET["wlua"] ?? "") ?? "";
+\$dns_bots_allowed = isset(\$_GET["dns_bots_allowed"]) ? kb_sanitize(base64_decode((string) \$_GET["dns_bots_allowed"])) : "";
+\$wlpath = kb_sanitize(\$_GET["wlpath"] ?? "") ?? "";
+\$t = kb_sanitize(\$_GET["t"] ?? null);
+\$le = kb_sanitize(\$_GET["le"] ?? "1");
+\$www = kb_sanitize(\$_GET["www"] ?? "0");
+\$https = kb_sanitize(\$_GET["https"] ?? "https");
+\$protocol = kb_sanitize(\$_GET["protocol"] ?? null);
 
 \$domain_no_www = preg_replace('/^www\./i', '', \$domain);
 
-// DNS API configuration for wildcard SSL certificates
-\$use_sub_domains = \$_GET["use_sub_domains"] ?? "0";
-\$api_env_content = \$_GET["api_env_content"] ?? "";
-\$dns_provider = \$_GET["dns_provider"] ?? "";
-
-\$official_bots_urls = \$_GET["official_bots_urls"] ?? "";
-\$disallowed_paths = \$_GET["disallowed_paths"] ?? "";
+\$official_bots_urls = kb_sanitize(\$_GET["official_bots_urls"] ?? "") ?? "";
+\$disallowed_paths = kb_sanitize(\$_GET["disallowed_paths"] ?? "") ?? "";
 
 if (!\$le) \$le = "0";
 if (!\$www) \$www = "0";
@@ -5154,22 +5150,14 @@ if (\$type == "log_download" || \$type == "log_download_error"){
 
 \$command = "";
 if (\$type == "install") {
-    \$command = "nice -n -5 sudo /opt/killbot/install.sh";
-    // Add DNS API configuration if subdomains are enabled
-    if (\$use_sub_domains == "1" && !empty(\$api_env_content)) {
-        \$command .= " -use_sub_domains \$use_sub_domains";
-        \$command .= " -api_env_content \"" . base64_encode(\$api_env_content) . "\"";
-        if (!empty(\$dns_provider)) {
-            \$command .= " -dns_provider \"" . \$dns_provider . "\"";
-        }
-    }
+    \$command = "sudo /opt/killbot/install.sh";
 }
-if (\$type == "ensite") \$command = "sudo kb ensite \$domain";
-if (\$type == "ensitep") \$command = "sudo kb ensite \$domain p";
-if (\$type == "dissite") \$command = "sudo kb dissite \$domain";
-if (\$type == "a2dissite") \$command = "sudo kb a2dissite \$domain";
-if (\$type == "cert_del") \$command = "sudo kb cert_del \$domain";
-if (\$type == "remove") \$command = "sudo kb remove \$domain";
+if (\$type == "ensite") \$command = "sudo /etc/init.d/kb ensite " . escapeshellarg((string) \$domain);
+if (\$type == "ensitep") \$command = "sudo /etc/init.d/kb ensite " . escapeshellarg((string) \$domain) . " p";
+if (\$type == "dissite") \$command = "sudo /etc/init.d/kb dissite " . escapeshellarg((string) \$domain);
+if (\$type == "a2dissite") \$command = "sudo /etc/init.d/kb a2dissite " . escapeshellarg((string) \$domain);
+if (\$type == "cert_del") \$command = "sudo /etc/init.d/kb cert_del " . escapeshellarg((string) \$domain);
+if (\$type == "remove") \$command = "sudo /etc/init.d/kb remove " . escapeshellarg((string) \$domain);
 
 if (!\$command) {
     echo "no command"; 
@@ -5177,22 +5165,22 @@ if (!\$command) {
 }
 
 if (\$type == "install"){
-    if (\$domain) \$command .= " -d \$domain";
-    if (\$cdn_domain) \$command .= " -cdn \$cdn_domain";
-    if (\$cdn_paths) \$command .= " -cdnp \$cdn_paths";
-    if (\$cdn_static) \$command .= " -cdns \$cdn_static";
+    if (\$domain) \$command .= " -d " . escapeshellarg(\$domain);
+    if (\$cdn_domain) \$command .= " -cdn " . escapeshellarg(\$cdn_domain);
+    if (\$cdn_paths) \$command .= " -cdnp " . escapeshellarg(\$cdn_paths);
+    if (\$cdn_static) \$command .= " -cdns " . escapeshellarg(\$cdn_static);
      
 
-    if (\$email)  \$command .= " -e \$email";
-    if (\$ip)     \$command .= " -ip \$ip";
-    if (\$folder) \$command .= " -f \$folder";
-    if (\$wlip)   \$command .= " -wlip \$wlip";
-    if (\$wlua)   \$command .= " -wlua \$wlua";    
-    if (\$wlpath)   \$command .= " -wlpath \$wlpath";
-    if (\$t)      \$command .= " -t \$t";
-    if (\$https)      \$command .= " -https \$https";
-    \$command .= " -le \$le";
-    \$command .= " -www \$www";
+    if (\$email)  \$command .= " -e " . escapeshellarg(\$email);
+    if (\$ip)     \$command .= " -ip " . escapeshellarg(\$ip);
+    if (\$folder) \$command .= " -f " . escapeshellarg(\$folder);
+    if (\$wlip)   \$command .= " -wlip " . escapeshellarg(\$wlip);
+    if (\$wlua)   \$command .= " -wlua " . escapeshellarg(\$wlua);
+    if (\$wlpath)   \$command .= " -wlpath " . escapeshellarg(\$wlpath);
+    if (\$t)      \$command .= " -t " . escapeshellarg(\$t);
+    if (\$https)      \$command .= " -https " . escapeshellarg(\$https);
+    \$command .= " -le " . escapeshellarg((string) \$le);
+    \$command .= " -www " . escapeshellarg((string) \$www);
 }
 
 \$command .= " 2>&1";
@@ -5326,20 +5314,7 @@ echo "KillBot cron file: $CRON_FILE"
 #sudo ufw reload
 #sudo ufw status
 
-# Create cron job to run every 20 minutes
-sudo tee /etc/cron.d/killbot-wildcard-renewal > /dev/null <<EOF
-# KillBot Wildcard SSL Certificate Renewal
-# Run every 30 minutes
-*/30 * * * * root /opt/killbot/renew_wildcard.sh >> /var/log/killbot/wildcard.log 2>&1
-EOF
-
-# Set proper permissions for cron file
-sudo chmod 644 /etc/cron.d/killbot-wildcard-renewal
-
-echo "Wildcard SSL certificate renewal system installed successfully!"
-echo "Cron job created to run every 20 minutes"
-echo "Log file location: /var/log/killbot/wildcard_renewal.log"
-
+rm -f /etc/cron.d/killbot-wildcard-renewal /opt/killbot/acme_check_api.sh
 
 # These parameters increase the backlog size for half-open TCP connections
 # and enable SYN cookies protection to resist TCP SYN flood attacks.

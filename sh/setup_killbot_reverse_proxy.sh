@@ -213,7 +213,7 @@ ensure_killbot_wildcard_ssl_or_abort() {
     exit 1
 }
 
-# SAN *.domain in fullchain.pem (same as renew_wildcard.sh / kb install)
+# SAN *.domain in fullchain.pem
 is_wildcard_cert() {
     local certfile="$1"
     local domain="$2"

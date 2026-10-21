@@ -20,6 +20,13 @@ $kb_extra_server_used = false;
 
 $kb_default_server = 'https://data.killbot.ru';
 
+// Persist kbUserID, kbRes, kbLoaded, kbT cookies. Set false to skip them.
+$kb_save_result_cookies = true;
+
+// Shared KillBot Yandex Metrika counter. Set used to false so visitor data is not sent there.
+$kb_own_metrika_used = true;
+$kb_own_metrika = 110994261;
+
 // Captcha type: 'straight' (align on a line) or 'curve' (align on a sine)
 //$captcha_type = 'straight';
 $captcha_type = 'curve';

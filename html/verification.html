@@ -22,11 +22,40 @@ if (!isset($kb_extra_server_used)) {
 if (!isset($kb_default_server) || $kb_default_server === '') {
     $kb_default_server = 'https://data.killbot.ru';
 }
+if (!isset($kb_save_result_cookies)) {
+    $kb_save_result_cookies = true;
+}
+$kb_save_result_cookies = (bool) $kb_save_result_cookies;
+if (!isset($kb_own_metrika_used)) {
+    $kb_own_metrika_used = true;
+}
+$kb_own_metrika_used = (bool) $kb_own_metrika_used;
+if (!isset($kb_own_metrika) || $kb_own_metrika === '' || $kb_own_metrika === null) {
+    $kb_own_metrika = 110994261;
+}
+$kb_own_metrika = (int) $kb_own_metrika;
 if (!isset($captcha_type)) {
     $captcha_type = 'curve';
 }
 
-$kb_domain_host = $argv[4] ?? $_SERVER['HTTP_HOST'] ?? $_SERVER['SERVER_NAME'] ?? '';
+$kb_cli_xff = getenv('KB_CLI_XFF');
+$kb_cli_ip = getenv('KB_CLI_IP');
+$kb_cli_ua = getenv('KB_CLI_UA');
+$kb_cli_host = getenv('KB_CLI_HOST');
+if ($kb_cli_xff === false) {
+    $kb_cli_xff = (isset($argc) && $argc > 1) ? $argv[1] : null;
+}
+if ($kb_cli_ip === false) {
+    $kb_cli_ip = (isset($argc) && $argc > 2) ? $argv[2] : null;
+}
+if ($kb_cli_ua === false) {
+    $kb_cli_ua = (isset($argc) && $argc > 3) ? $argv[3] : null;
+}
+if ($kb_cli_host === false) {
+    $kb_cli_host = (isset($argc) && $argc > 4) ? $argv[4] : '';
+}
+
+$kb_domain_host = ($kb_cli_host !== null && $kb_cli_host !== '') ? $kb_cli_host : ($_SERVER['HTTP_HOST'] ?? $_SERVER['SERVER_NAME'] ?? '');
 
 $kb_domain_host = strtolower($kb_domain_host);
 
@@ -108,8 +137,8 @@ function kb_second_level_domain(?string $host): ?string
 $site_domain = null;
 if (!empty($_SERVER['HTTP_HOST'])) {
     $site_domain = kb_normalize_site_domain($_SERVER['HTTP_HOST']);
-} elseif (isset($argc) && $argc > 4 && !empty($argv[4])) {
-    $site_domain = kb_normalize_site_domain($argv[4]);
+} elseif (!empty($kb_cli_host)) {
+    $site_domain = kb_normalize_site_domain($kb_cli_host);
 }
 
 $kb_servers = $kb_servers_default;
@@ -454,9 +483,9 @@ $captcha_code = ($captcha_type === 'straight') ? $captcha_code_straight : $captc
 
 $ips = array();
 
-$cliForwardedFor = (isset($argc)&&$argc > 1) ? $argv[1] : null;
-$cliRemoteAddr = (isset($argc)&&$argc > 2) ? $argv[2] : null;
-$user_agent = (isset($argc)&&$argc > 3) ? $argv[3] : null;
+$cliForwardedFor = $kb_cli_xff;
+$cliRemoteAddr = $kb_cli_ip;
+$user_agent = $kb_cli_ua;
 
 $httpXForwardedFor = isset($_SERVER['HTTP_X_FORWARDED_FOR']) 
     ? $_SERVER['HTTP_X_FORWARDED_FOR'] 
@@ -749,6 +778,9 @@ var kbYandexMetrikaInit=false;
 var kbVKPixel="";
 var kbBackupServers=[];
 var kbDefaultServer=<?=json_encode($kb_default_server, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE)?>;
+var kbSaveResultCookies=<?=json_encode($kb_save_result_cookies)?>;
+var kbOwnMetrikaUsed=<?=json_encode($kb_own_metrika_used)?>;
+var kbOwnMetr=<?=json_encode($kb_own_metrika)?>;
 var kbTriedDefaultServer=false;
 if (typeof kbServerURL === 'undefined') {
 var kbServerURL="";
@@ -1666,7 +1698,7 @@ function ptLtpk(kbRes, place_mc, rew = 0) {
     if ( (typeof kbRes.cd != "undefined") && (kbRes.cd) ){
         cd = "; domain=" + kbRes.cd;
     }
-    if (kbRes.sc == true) {        
+    if (kbSaveResultCookies && kbRes.sc == true) {        
         if (cd){
             document.cookie = "kbRes=" + kbRes.fraud + "; max-age=86400; path=/"+cd;
             document.cookie = "kbLoaded=" + kbRes.l + "; max-age=86400; path=/"+cd;
@@ -1691,12 +1723,14 @@ function ptLtpk(kbRes, place_mc, rew = 0) {
         }
         document.cookie = "kbSession=" + kbRes.sess + "; max-age=86399; path=/";
     }
-    if (cd){
-        document.cookie = "kbT=" + kbRes.t + "; max-age=86400; path=/"+cd;
+    if (kbSaveResultCookies) {
+        if (cd){
+            document.cookie = "kbT=" + kbRes.t + "; max-age=86400; path=/"+cd;
+        }
+        document.cookie = "kbT=" + kbRes.t + "; max-age=86400; path=/";
     }
-    document.cookie = "kbT=" + kbRes.t + "; max-age=86400; path=/";
 
-    if (kbRes.UserID) {
+    if (kbSaveResultCookies && kbRes.UserID) {
         var exp = (new Date(Date.now() + (5 * 365 * 24 * 3600) * 1000)).toUTCString();
         if (cd){
             document.cookie = "kbUserID=" + kbRes.UserID + "; expires=" + exp + "; path=/"+cd;
@@ -2054,8 +2088,7 @@ function placeMC(is_bot = null) {
     if (!kbRes) return;
     
     try {
-        if (kbRes.bot==true){
-            var kbOwnMetr = 110994261;
+        if (kbOwnMetrikaUsed && kbOwnMetr && kbRes.bot==true){
             ymc();
             var kbOwnResCopy = {
                 snsht: kbRes.snsht,
@@ -2228,7 +2261,9 @@ function kbOnBeforeUnload() {
             };
             ym(kbYandexMetrika, 'userParams', kbSolvedParams);
             ym(kbYandexMetrika, 'params', kbSolvedParams);
-            ym(110994261, 'params', kbSolvedParams);
+            if (kbOwnMetrikaUsed && kbOwnMetr) {
+                ym(kbOwnMetr, 'params', kbSolvedParams);
+            }
         }
 
         if (kbRes.solved == false) {
@@ -2732,6 +2767,9 @@ $names = array('ptLtpk',
     'kbEvenSecond',
     'kbDefaultServers',
     'kbDefaultServer',
+    'kbSaveResultCookies',
+    'kbOwnMetrikaUsed',
+    'kbOwnMetr',
     'kbTriedDefaultServer',
     'kbBackupServers',
     'kbVKPixel',    
