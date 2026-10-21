@@ -1,25 +1,25 @@
 #!/bin/bash
 #
-# Refresh KillBot from GitHub Releases (default) or from a git ref.
+# Refresh KillBot from the main branch (default) or from a git ref / GitHub Release.
 #
 # Usage:
 #   sudo /opt/killbot/UpdateAll.sh
+#   sudo /opt/killbot/UpdateAll.sh main
 #   sudo /opt/killbot/UpdateAll.sh latest
 #   sudo /opt/killbot/UpdateAll.sh v3.4
-#   sudo /opt/killbot/UpdateAll.sh main
 #   sudo /opt/killbot/UpdateAll.sh <commit>
 #
 set -e
 
 KB_GIT_REPO="${KB_GIT_REPO:-grigoriy-melnikov/KillBot}"
-REF="${1:-latest}"
+REF="${1:-main}"
 
 usage() {
-    echo "Usage: $0 [latest|TAG|BRANCH|COMMIT]"
-    echo "  (no arg) / latest   installer from GitHub Releases latest"
+    echo "Usage: $0 [main|latest|TAG|BRANCH|COMMIT]"
+    echo "  (no arg) / main     installer and files from the main branch"
+    echo "  latest              installer from GitHub Releases latest"
     echo "  v3.4                installer from that GitHub Release"
-    echo "  main / BRANCH       installer and files from that git branch"
-    echo "  COMMIT              installer and files from that git revision"
+    echo "  BRANCH / COMMIT     installer and files from that git revision"
     exit 1
 }
 

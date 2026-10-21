@@ -21,7 +21,7 @@ KILLBOT_SESSION_LIFETIME=86400 #sec
 set -e # Exit immediately if any command fails
 
 # Optional git ref for raw downloads (branch, tag, or commit).
-# UpdateAll.sh passes KB_GIT_REF when not installing from GitHub Releases latest.
+# UpdateAll.sh passes KB_GIT_REF (default main).
 if [[ -z "${KB_GIT_REF:-}" && -n "${1:-}" && "$1" != -* ]]; then
   KB_GIT_REF="$1"
 fi
@@ -35,7 +35,11 @@ KB_GIT_RAW="https://raw.githubusercontent.com/grigoriy-melnikov/KillBot/${KB_GIT
 kb_download() {
   local dest="$1"
   local path="$2"
-  timeout 15 curl --connect-timeout 10 -f -L -H "Cache-Control: no-cache" -H "Pragma: no-cache" -o "$dest" "${KB_GIT_RAW}/${path}"
+  local url="${KB_GIT_RAW}/${path}"
+  if ! timeout 15 curl --connect-timeout 10 -f -L -H "Cache-Control: no-cache" -H "Pragma: no-cache" -o "$dest" "$url"; then
+    echo "ERROR: download failed: $url" >&2
+    return 1
+  fi
 }
 
 # sudo resets the environment, so NEEDRESTART_* from the launch command never
@@ -4213,7 +4217,11 @@ sudo sudo tee /opt/killbot/update.sh > /dev/null <<EOF
 kb_download() {
   local dest="\$1"
   local path="\$2"
-  timeout 15 curl --connect-timeout 10 -f -L -o "\$dest" "https://raw.githubusercontent.com/grigoriy-melnikov/KillBot/${KB_GIT_REF}/\$path"
+  local url="https://raw.githubusercontent.com/grigoriy-melnikov/KillBot/${KB_GIT_REF}/\$path"
+  if ! timeout 15 curl --connect-timeout 10 -f -L -o "\$dest" "\$url"; then
+    echo "ERROR: download failed: \$url" >&2
+    return 1
+  fi
 }
 
 FILE="/opt/killbot/html/verification.php"
@@ -4497,7 +4505,18 @@ FILE="/opt/killbot/read_apache_log.sh"
         exit 1
     fi
 
+FILE="/opt/killbot/dns_provider_hint.sh"
+    kb_download "\$FILE" "sh/dns_provider_hint.sh"
+
+    if [ \$? -eq 0 ]; then
+        echo "The dns_provider_hint.sh file has been successfully loaded."
+    else
+        echo "Error loading the dns_provider_hint.sh file."
+        exit 1
+    fi
+
 sudo chmod +x /opt/killbot/check_killbot_reverse_proxy.sh /opt/killbot/setup_killbot_reverse_proxy.sh /opt/killbot/update-postrouting.sh /opt/killbot/update-symmetric-ip.sh /opt/killbot/check_host_curl.sh /opt/killbot/read_apache_log.sh
+sudo chmod 644 /opt/killbot/dns_provider_hint.sh
 sudo chown root:root /opt/killbot/check_host_curl.sh /opt/killbot/read_apache_log.sh /opt/killbot/install.sh /etc/init.d/kb 2>/dev/null || true
 sudo chmod 755 /opt/killbot/check_host_curl.sh /opt/killbot/read_apache_log.sh /opt/killbot/install.sh /etc/init.d/kb 2>/dev/null || true
 sudo chmod +x /opt/killbot/f2b/subnet-monitor.sh /opt/killbot/cert_delete.sh /opt/killbot/on_killbot_protection.sh /opt/killbot/off_killbot_protection.sh /opt/killbot/official_allowed_ips.sh /opt/killbot/cert_wildcard_new.sh /opt/killbot/clean_up_unused_certs.sh /opt/killbot/UpdateAll.sh
