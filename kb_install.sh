@@ -3105,7 +3105,23 @@ remove_domain() {
     echo "Domain \$domain removed."
 }
 
+check_internet() {
+    echo "Checking internet connectivity (ping 8.8.8.8)..."
+    if ! command -v ping >/dev/null 2>&1; then
+        echo "ERROR: ping is not installed; cannot verify internet access." >&2
+        exit 1
+    fi
+    if ! ping -c 3 -W 3 8.8.8.8 >/dev/null 2>&1; then
+        echo "ERROR: this server has no internet access (ping 8.8.8.8 failed)." >&2
+        echo "The IP may be blocked from outside, or outbound internet on this server is misconfigured." >&2
+        exit 1
+    fi
+    echo "Internet: OK"
+}
+
 status() {
+    check_internet
+
     local failed=0
     local f apache_out nginx_out http_code server_ip
 
