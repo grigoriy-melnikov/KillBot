@@ -1,6 +1,6 @@
 # KillBot DNS Verification page
 
-Install a self-hosted KillBot DNS Verification page on a clean **Ubuntu 22.04** server.
+Install a self-hosted KillBot DNS Verification page on a clean **Ubuntu 22.04**, **24.04**, **25.04**, **25.10**, or **26.04** server.
 
 KillBot runs as a reverse proxy in front of your website. All incoming traffic reaches the KillBot server first. New visitors complete a lightweight JavaScript verification, and only verified traffic is forwarded to your origin server.
 
@@ -46,18 +46,18 @@ For most legitimate visitors, verification is automatic. A CAPTCHA is shown only
 
 ## Requirements
 
-- A **clean Ubuntu 22.04** server without a hosting control panel
+- A **clean Ubuntu 22.04, 24.04, 25.04, 25.10, or 26.04** server without a hosting control panel
 - A separate VPS or dedicated server; do not install KillBot on the origin web server
 - At least **2 vCPU, 2 GB RAM, and 20 GB of disk space**
 - Root or `sudo` access
 - One public IPv4 address
 - A [KillBot account](https://my.kill-bot.net/)
 
-Ubuntu 24.04 is not currently supported by this installer.
+The installer uses the distro default PHP with Apache `mpm_prefork`.
 
 ## Install
 
-Run these commands on the clean Ubuntu 22.04 server:
+Run these commands on the clean Ubuntu 22.04, 24.04, 25.04, 25.10, or 26.04 server:
 
 ```bash
 sudo apt update
@@ -172,7 +172,7 @@ For higher availability, a domain can be connected to more than one KillBot serv
 | File | Purpose |
 | --- | --- |
 | `sh/UpdateAll_nginx.sh` | Downloads the installer from the `main` branch by default, or from a given GitHub Release, branch, or commit, then refreshes the installed server components. |
-| `sh/ubuntu_check.sh` | Verifies Ubuntu 22.04 and checks for incompatible hosting panels or pre-existing server stacks. |
+| `sh/ubuntu_check.sh` | Verifies Ubuntu 22.04, 24.04, 25.04, 25.10, or 26.04 and checks for incompatible hosting panels or pre-existing server stacks. |
 | `sh/setup_killbot_reverse_proxy.sh` | Creates per-site Nginx reverse proxies for KillBot backend domains when wildcard DNS and SSL are available. |
 | `sh/check_killbot_reverse_proxy.sh` | Runs recurring DNS and HTTP health checks for KillBot proxy backends and removes failed routes from the active list. |
 | `sh/check_host_curl.sh` | Tests origin reachability with the requested source IP, host, port, and protocol. |

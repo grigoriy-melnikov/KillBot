@@ -500,10 +500,11 @@ $user_agent = isset($_SERVER['HTTP_USER_AGENT'])
     : $user_agent;
     
 if (!empty($httpXForwardedFor)) {
-    $ips = explode(",", $httpXForwardedFor);
+    $ips = explode(",", (string) $httpXForwardedFor);
 }
 
-$real_remote_addr = !empty($ips[0]) ? $ips[0] : $remoteAddr;
+$real_remote_addr = (string) (!empty($ips[0]) ? $ips[0] : ($remoteAddr ?? ''));
+$user_agent = (string) ($user_agent ?? '');
 
 function get_hidden_links(){
     $links = ["login", "shop", "products", "news", "contacts", "search", "blog", "faq"];
@@ -563,7 +564,7 @@ ob_start();
     <meta http-equiv="Cache-Control" content="no-store, no-cache, must-revalidate">
     <meta http-equiv="Pragma" content="no-cache">
     <meta http-equiv="Expires" content="0">
-    <title id="pageTitle">KillBot user verification [<?=$real_remote_addr?>] [<?=htmlspecialchars($user_agent)?>]...</title>
+    <title id="pageTitle">KillBot user verification [<?=htmlspecialchars($real_remote_addr, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8')?>] [<?=htmlspecialchars($user_agent, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8')?>]...</title>
     <script>        
         if (typeof window.kbErrors === 'undefined'){window.kbErrors=[];}
         window.kbTitleVerification=true;        

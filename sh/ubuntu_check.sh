@@ -4,7 +4,7 @@ set -e
 
 echo "=== System check ==="
 
-# 1. Check Ubuntu 22.04
+# 1. Check Ubuntu 22.04 / 24.04 / 25.04 / 25.10 / 26.04
 if [ ! -f /etc/os-release ]; then
     echo "ERROR: Cannot detect OS"
     exit 1
@@ -17,12 +17,15 @@ if [ "$ID" != "ubuntu" ]; then
     exit 1
 fi
 
-if [ "$VERSION_ID" != "22.04" ]; then
-    echo "ERROR: Ubuntu 22.04 required (detected: $VERSION_ID)"
-    exit 1
-fi
-
-echo "OK: Ubuntu 22.04 detected"
+case "$VERSION_ID" in
+    22.04|24.04|25.04|25.10|26.04)
+        echo "OK: Ubuntu $VERSION_ID detected"
+        ;;
+    *)
+        echo "ERROR: Ubuntu 22.04, 24.04, 25.04, 25.10, or 26.04 required (detected: $VERSION_ID)"
+        exit 1
+        ;;
+esac
 
 
 # 2. Check for control panels / frameworks

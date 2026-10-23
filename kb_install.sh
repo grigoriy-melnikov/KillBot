@@ -115,11 +115,11 @@ if [ "$(id -u)" -ne 0 ]; then
     exit 1
 fi
 
-# Check that the system is Ubuntu and version is 22.04
-if [[ "$OS_ID" == "Ubuntu" && ("$OS_VERSION" == "22.04") ]]; then
+# Check that the system is a supported Ubuntu release
+if [[ "$OS_ID" == "Ubuntu" ]] && [[ "$OS_VERSION" == "22.04" || "$OS_VERSION" == "24.04" || "$OS_VERSION" == "25.04" || "$OS_VERSION" == "25.10" || "$OS_VERSION" == "26.04" ]]; then
     echo "Running on Ubuntu $OS_VERSION is allowed."
 else
-    echo "Error: The script can only run on Ubuntu 22.04."
+    echo "Error: The script can only run on Ubuntu 22.04, 24.04, 25.04, 25.10, or 26.04 (detected: ${OS_ID} ${OS_VERSION})."
     exit 1
 fi
 
@@ -898,74 +898,48 @@ sudo chmod -R 755 /var/log/apache2/
 #sudo chown -R www-data:www-data /var/www/html/webroot
 
 #####################
-#MPM_MODE="mpm_event"  
-MPM_MODE="mpm_prefork"   # event by default
-
-if [[ "$OS_VERSION" == "22.04" ]]; then
-    PHP_VERSION="8.1"
-    PHP_VERSION_APACHE="8.1"
-else
-    PHP_VERSION="7.4"
-    PHP_VERSION_APACHE="7.4"
-fi
-
-#PHP_VERSION=$(php -r 'echo PHP_MAJOR_VERSION.".".PHP_MINOR_VERSION;')
-#echo "PHP version is $PHP_VERSION"
-
-#PHP_CONF=$(ls /etc/apache2/mods-enabled/ 2>/dev/null | grep -oE 'php[0-9]+\.[0-9]+\.conf' | head -n1)
-
-#if [[ -n "$PHP_CONF" ]]; then
-#    PHP_VERSION_APACHE=$(echo "$PHP_CONF" | grep -oE '[0-9]+\.[0-9]+')
-#    echo "✅ Apache PHP $PHP_VERSION_APACHE (mod_php)"
-#fi
-
-# If mod_php is not found — look for a php-fpm socket
-#FPM_CONF=$(grep -R "php[0-9]\.[0-9]-fpm" /etc/apache2/sites-enabled/ 2>/dev/null | head -n1)
-#if [[ -n "$FPM_CONF" ]]; then
-#    PHP_VERSION_APACHE=$(echo "$FPM_CONF" | grep -oE 'php[0-9]+\.[0-9]+')
-#    echo "✅ Apache PHP $PHP_VERSION_APACHE (php-fpm)"
-#fi
-
-if [[ "$MPM_MODE" == "mpm_event" ]]; then
-    # mpm_event + php-fpm
-    echo "Configuring for mpm_event with php-fpm..."        
-    sudo a2dismod "php$PHP_VERSION_APACHE"
-    sudo apt install -y "php${PHP_VERSION}-fpm"
-    sudo a2enconf "php${PHP_VERSION_APACHE}-fpm"
-    sudo a2enmod proxy_fcgi setenvif    
-
-    sudo a2dismod mpm_worker    
-    sudo a2dismod mpm_prefork
-
-    sudo a2enmod mpm_event
-    
-elif [[ "$MPM_MODE" == "mpm_prefork" ]]; then
-
-    sudo apt install -y "php${PHP_VERSION}-fpm"
-    echo "Configuring for mpm_prefork with mod_php..."        
-    sudo a2disconf "php${PHP_VERSION_APACHE}-fpm"
-    
-    # remove php-fpm if needed
-    # sudo apt remove -y "php${PHP_VERSION}-fpm"
-
-    sudo a2dismod mpm_worker    
-    sudo a2dismod mpm_event    
-
-    sudo a2dismod proxy_fcgi
-    sudo a2enmod "php$PHP_VERSION_APACHE"
-    
-    sudo a2enmod mpm_prefork
-else
-    echo "Unknown MPM mode: $MPM_MODE"
+# Distro default PHP (libapache2-mod-php) + mpm_prefork. No php-fpm / mpm_event.
+echo "Configuring Apache mpm_prefork with default mod_php..."
+sudo a2dismod mpm_event 2>/dev/null || true
+sudo a2dismod mpm_worker 2>/dev/null || true
+sudo a2enmod mpm_prefork
+sudo a2dismod proxy_fcgi 2>/dev/null || true
+for fpm_conf in /etc/apache2/conf-enabled/php*-fpm.conf; do
+    [[ -e "$fpm_conf" ]] || continue
+    sudo a2disconf "$(basename "$fpm_conf" .conf)" || true
+done
+PHP_LOAD=""
+for candidate in /etc/apache2/mods-available/php*.load; do
+    if [[ -f "$candidate" ]]; then
+        PHP_LOAD="$candidate"
+        break
+    fi
+done
+if [[ -z "$PHP_LOAD" ]]; then
+    echo "ERROR: libapache2-mod-php did not install an Apache php*.load module" >&2
     exit 1
 fi
+PHP_MOD="$(basename "$PHP_LOAD" .load)"
+sudo a2enmod "$PHP_MOD"
+echo "Enabled Apache module: $PHP_MOD (mpm_prefork)"
 #####################
 
-sudo apt install lua5.1
-sudo apt install lua-md5
-sudo apt install luarocks
-#sudo luarocks install md5 || true
+# lua5.1 is in universe on 22.04–26.04. Apache mod_lua may be linked
+# against 5.1, 5.2, or 5.4 — kb.lua searches all of them for lua-md5.
+if ! sudo apt install -y lua5.1; then
+    echo "lua5.1 is not available; installing a later Lua interpreter"
+    sudo apt install -y lua5.4 || sudo apt install -y lua5.3 || sudo apt install -y lua5.2
+fi
+sudo apt install -y lua-md5 luarocks
 sudo a2enmod lua
+
+KB_LUA_MULTIARCH="$(dpkg-architecture -qDEB_HOST_MULTIARCH 2>/dev/null || echo x86_64-linux-gnu)"
+KB_LUA_PATH=""
+KB_LUA_CPATH=""
+for ver in 5.1 5.2 5.3 5.4; do
+    KB_LUA_PATH+="/usr/share/lua/${ver}/?.lua;/usr/share/lua/${ver}/?/init.lua;/usr/local/share/lua/${ver}/?.lua;"
+    KB_LUA_CPATH+="/usr/lib/${KB_LUA_MULTIARCH}/lua/${ver}/?.so;/usr/lib/${KB_LUA_MULTIARCH}/lua/${ver}/?/core.so;/usr/local/lib/lua/${ver}/?.so;"
+done
 
 rm -rf /var/log/apache2/*
 rm -rf /var/log/killbot/*
@@ -1373,11 +1347,8 @@ EOF
 sudo chmod +x /opt/killbot/kbEqual.php
 
 sudo sudo tee /opt/killbot/kb.lua > /dev/null <<EOF
-package.path = "/usr/local/share/lua/5.1/?.lua;" .. package.path
-package.cpath = "/usr/local/lib/lua/5.1/?.so;" .. package.cpath
-
-package.path = "/usr/share/lua/5.2/?.lua;/usr/share/lua/5.2/?/init.lua;/usr/share/lua/5.1/?.lua;/usr/share/lua/5.1/?/init.lua;" .. package.path
-package.cpath = "/usr/lib/x86_64-linux-gnu/lua/5.2/?.so;/usr/lib/x86_64-linux-gnu/lua/5.2/?/core.so;/usr/lib/x86_64-linux-gnu/lua/5.1/?.so;/usr/lib/x86_64-linux-gnu/lua/5.1/?/core.so;" .. package.cpath
+package.path = "${KB_LUA_PATH}" .. package.path
+package.cpath = "${KB_LUA_CPATH}" .. package.cpath
 
 local md5 = require "md5"
 
