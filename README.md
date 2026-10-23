@@ -53,7 +53,7 @@ For most legitimate visitors, verification is automatic. A CAPTCHA is shown only
 - One public IPv4 address
 - A [KillBot account](https://my.kill-bot.net/)
 
-The installer uses the distro default PHP with Apache `mpm_prefork`.
+The installer uses Apache `mpm_prefork` with a **patched PHP** (`8.2.35+`, `8.3.36+`, `8.4.27+`, or `8.5.12+`) via `ppa:ondrej/php`. Ubuntu 22.04's default PHP 8.1 is not used: that branch is end-of-life and is not fixed for PHP2Shell (`CVE-2026-109618`, `CVE-2026-109619`).
 
 ## Install
 
@@ -112,6 +112,8 @@ sudo /opt/killbot/UpdateAll.sh <commit>
 ```
 
 After a major update, open the project in the KillBot dashboard and use **Reload DNS** so its generated configuration is refreshed.
+
+`UpdateAll.sh` also upgrades PHP to a patched build and restarts Apache so the old interpreter is not left in memory. Confirm with `php -v`. Required versions: **8.2.35**, **8.3.36**, **8.4.27**, or **8.5.12** (or newer in that series). PHP 8.1 is not supported.
 
 ## Built-in traffic protection
 

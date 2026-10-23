@@ -48,6 +48,136 @@ sudo() {
     command sudo DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a NEEDRESTART_SUSPEND=1 "$@"
 }
 
+# PHP2Shell (CVE-2026-109618, CVE-2026-109619): unauthenticated RCE in the
+# interpreter. Fixed in 8.2.35 / 8.3.36 / 8.4.27 / 8.5.12. PHP 8.1 is EOL
+# and is not patched. Ubuntu 22.04 ships 8.1, so KillBot installs a patched
+# series from ppa:ondrej/php and runs Apache mpm_prefork + matching mod_php.
+KB_PHP_SERIES=""
+
+kb_php_release() {
+    php -r 'echo PHP_MAJOR_VERSION.".".PHP_MINOR_VERSION.".".PHP_RELEASE_VERSION;' 2>/dev/null || true
+}
+
+kb_php_is_patched() {
+    local ver="$1"
+    [[ -n "$ver" ]] || return 1
+    case "$ver" in
+        8.5.*) dpkg --compare-versions "$ver" ge "8.5.12" ;;
+        8.4.*) dpkg --compare-versions "$ver" ge "8.4.27" ;;
+        8.3.*) dpkg --compare-versions "$ver" ge "8.3.36" ;;
+        8.2.*) dpkg --compare-versions "$ver" ge "8.2.35" ;;
+        *) return 1 ;;
+    esac
+}
+
+kb_php_upstream_from_deb() {
+    echo "${1:-}" | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1 || true
+}
+
+kb_php_candidate_version() {
+    apt-cache policy "libapache2-mod-php${1}" 2>/dev/null | awk '/Candidate:/ {print $2; exit}'
+}
+
+kb_enable_ondrej_php_ppa() {
+    echo "Enabling ppa:ondrej/php for patched PHP packages..."
+    sudo apt-get install -y software-properties-common ca-certificates gnupg
+    sudo add-apt-repository -y universe || true
+    if sudo add-apt-repository -y ppa:ondrej/php; then
+        if sudo apt-get update -y; then
+            echo "ppa:ondrej/php is enabled."
+            return 0
+        fi
+        echo "WARNING: ppa:ondrej/php has no packages for Ubuntu ${OS_VERSION}; removing it."
+        sudo add-apt-repository -y --remove ppa:ondrej/php || true
+        sudo apt-get update -y
+        return 1
+    fi
+    echo "WARNING: could not add ppa:ondrej/php; trying Ubuntu packages only."
+    sudo apt-get update -y || true
+    return 1
+}
+
+kb_php_pick_series() {
+    local series cand up preferred seen=""
+    local -a order=()
+    preferred="$(php -r 'echo PHP_MAJOR_VERSION.".".PHP_MINOR_VERSION;' 2>/dev/null || true)"
+    case "$preferred" in
+        8.2|8.3|8.4|8.5) order+=("$preferred") ;;
+    esac
+    case "${OS_VERSION}" in
+        22.04|24.04) order+=(8.3 8.4 8.5 8.2) ;;
+        25.04|25.10) order+=(8.4 8.3 8.5 8.2) ;;
+        26.04) order+=(8.5 8.4 8.3 8.2) ;;
+        *) order+=(8.3 8.4 8.5 8.2) ;;
+    esac
+    for series in "${order[@]}"; do
+        [[ " $seen " == *" $series "* ]] && continue
+        seen+=" $series"
+        cand="$(kb_php_candidate_version "$series")"
+        [[ -n "$cand" && "$cand" != "(none)" ]] || continue
+        up="$(kb_php_upstream_from_deb "$cand")"
+        if kb_php_is_patched "$up"; then
+            echo "$series"
+            return 0
+        fi
+        echo "Skipping PHP ${series}: apt candidate ${cand} is not patched (need 8.2.35 / 8.3.36 / 8.4.27 / 8.5.12)." >&2
+    done
+    return 1
+}
+
+kb_install_patched_php() {
+    local series cand php_ver pkg
+    echo "Installing patched PHP (PHP2Shell CVE-2026-109618 / CVE-2026-109619)..."
+    kb_enable_ondrej_php_ppa || true
+
+    series="$(kb_php_pick_series || true)"
+    if [[ -z "$series" ]]; then
+        echo "ERROR: no patched PHP package is available (need 8.2.35+, 8.3.36+, 8.4.27+, or 8.5.12+)." >&2
+        echo "Ubuntu ${OS_VERSION} default PHP 8.1 is EOL and is not fixed. Enable ppa:ondrej/php and retry." >&2
+        php -v 2>/dev/null || true
+        exit 1
+    fi
+    cand="$(kb_php_candidate_version "$series")"
+    echo "Installing PHP ${series} (candidate ${cand}) with Apache mpm_prefork + libapache2-mod-php${series}..."
+
+    sudo a2dismod mpm_event 2>/dev/null || true
+    sudo a2dismod mpm_worker 2>/dev/null || true
+    sudo a2enmod mpm_prefork
+
+    sudo apt-get install -y "php${series}" "php${series}-cli" "libapache2-mod-php${series}"
+
+    if [[ -x "/usr/bin/php${series}" ]]; then
+        sudo update-alternatives --install /usr/bin/php php "/usr/bin/php${series}" 83 >/dev/null 2>&1 || true
+        sudo update-alternatives --set php "/usr/bin/php${series}" || true
+    fi
+
+    for load in /etc/apache2/mods-available/php*.load; do
+        [[ -f "$load" ]] || continue
+        pkg="$(basename "$load" .load)"
+        if [[ "$pkg" != "php${series}" ]]; then
+            sudo a2dismod "$pkg" 2>/dev/null || true
+        fi
+    done
+    sudo a2enmod "php${series}"
+
+    for pkg in $(dpkg-query -W -f='${Package}\n' 'libapache2-mod-php*' 2>/dev/null || true); do
+        if [[ "$pkg" != "libapache2-mod-php${series}" ]]; then
+            sudo apt-get remove -y "$pkg" || true
+        fi
+    done
+
+    php_ver="$(kb_php_release)"
+    echo "PHP CLI: $(php -v 2>/dev/null | head -n 1)"
+    if ! kb_php_is_patched "$php_ver"; then
+        echo "ERROR: PHP ${php_ver:-not installed} is still vulnerable to PHP2Shell." >&2
+        echo "Required: 8.2.35, 8.3.36, 8.4.27, or 8.5.12 (or newer in that series). PHP 8.1 is not supported." >&2
+        exit 1
+    fi
+    KB_PHP_SERIES="$series"
+    echo "PHP ${php_ver} is patched. Apache module: php${series}"
+    sudo systemctl restart apache2 || true
+}
+
 sudo mkdir -p /etc/needrestart/conf.d
 sudo tee /etc/needrestart/conf.d/zzz-killbot.conf > /dev/null <<'NREOF'
 $nrconf{restart} = 'a';
@@ -125,7 +255,8 @@ fi
 
 sudo apt update -y
 
-sudo apt install -y apache2 php libapache2-mod-php
+sudo apt install -y apache2 software-properties-common ca-certificates gnupg
+kb_install_patched_php
 
 sudo chown -R www-data:www-data /var/www/html
 
@@ -898,8 +1029,8 @@ sudo chmod -R 755 /var/log/apache2/
 #sudo chown -R www-data:www-data /var/www/html/webroot
 
 #####################
-# Distro default PHP (libapache2-mod-php) + mpm_prefork. No php-fpm / mpm_event.
-echo "Configuring Apache mpm_prefork with default mod_php..."
+# Patched PHP (libapache2-mod-php) + mpm_prefork. No php-fpm / mpm_event.
+echo "Configuring Apache mpm_prefork with patched mod_php..."
 sudo a2dismod mpm_event 2>/dev/null || true
 sudo a2dismod mpm_worker 2>/dev/null || true
 sudo a2enmod mpm_prefork
@@ -908,18 +1039,15 @@ for fpm_conf in /etc/apache2/conf-enabled/php*-fpm.conf; do
     [[ -e "$fpm_conf" ]] || continue
     sudo a2disconf "$(basename "$fpm_conf" .conf)" || true
 done
-PHP_LOAD=""
-for candidate in /etc/apache2/mods-available/php*.load; do
-    if [[ -f "$candidate" ]]; then
-        PHP_LOAD="$candidate"
-        break
-    fi
-done
-if [[ -z "$PHP_LOAD" ]]; then
-    echo "ERROR: libapache2-mod-php did not install an Apache php*.load module" >&2
+if [[ -z "${KB_PHP_SERIES:-}" ]]; then
+    echo "ERROR: patched PHP series was not selected" >&2
     exit 1
 fi
-PHP_MOD="$(basename "$PHP_LOAD" .load)"
+PHP_MOD="php${KB_PHP_SERIES}"
+if [[ ! -f "/etc/apache2/mods-available/${PHP_MOD}.load" ]]; then
+    echo "ERROR: Apache module ${PHP_MOD}.load is missing" >&2
+    exit 1
+fi
 sudo a2enmod "$PHP_MOD"
 echo "Enabled Apache module: $PHP_MOD (mpm_prefork)"
 #####################
@@ -3123,7 +3251,22 @@ status() {
     check_internet
 
     local failed=0
-    local f apache_out nginx_out http_code server_ip
+    local f apache_out nginx_out http_code server_ip php_ver php_ok
+
+    php_ver=\$(php -r 'echo PHP_MAJOR_VERSION.".".PHP_MINOR_VERSION.".".PHP_RELEASE_VERSION;' 2>/dev/null || true)
+    php_ok=0
+    case "\$php_ver" in
+        8.5.*) dpkg --compare-versions "\$php_ver" ge 8.5.12 && php_ok=1 ;;
+        8.4.*) dpkg --compare-versions "\$php_ver" ge 8.4.27 && php_ok=1 ;;
+        8.3.*) dpkg --compare-versions "\$php_ver" ge 8.3.36 && php_ok=1 ;;
+        8.2.*) dpkg --compare-versions "\$php_ver" ge 8.2.35 && php_ok=1 ;;
+    esac
+    if [ "\$php_ok" -eq 1 ]; then
+        echo "PHP \$php_ver is patched for PHP2Shell (CVE-2026-109618, CVE-2026-109619)."
+    else
+        echo "ERROR: PHP \${php_ver:-not installed} is vulnerable to PHP2Shell. Need 8.2.35+, 8.3.36+, 8.4.27+, or 8.5.12+. PHP 8.1 is not supported. Run: sudo /opt/killbot/UpdateAll.sh" >&2
+        failed=1
+    fi
 
     for f in kb.php empty.php le_receive_cert.php empty_en.html empty_ru.html; do
         if [ ! -f "/var/www/html/\$f" ]; then
@@ -5245,6 +5388,8 @@ echo "1. System-wide file-max: $(cat /proc/sys/fs/file-max)"
 result=$(cat /proc/$(pgrep -u root -f 'apache2' | head -n1)/limits | grep 'open files')
 echo "2. Apache single process open files limit: $result"
 echo "3. MPM: $(apache2ctl -M 2>/dev/null | grep mpm_)"
+echo "4. PHP: $(php -v 2>/dev/null | head -n 1)"
+echo "5. Apache PHP module: $(apache2ctl -M 2>/dev/null | awk '/php/ {print $1}')"
 
 # Check Apache2 status
 systemctl status apache2 --no-pager
