@@ -42,6 +42,30 @@ kb_download() {
   fi
 }
 
+kb_install_local_script() {
+  local dest="$1"
+  local name="$2"
+  local src_dir
+  src_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+  if [ -f "$src_dir/$name" ]; then
+    sudo install -m 755 "$src_dir/$name" "$dest"
+    echo "Installed $name from installer directory."
+    return 0
+  fi
+  if kb_download "$dest" "killbot_dns/$name"; then
+    sudo chmod 755 "$dest"
+    echo "The $name file has been successfully loaded."
+    return 0
+  fi
+  if kb_download "$dest" "sh/$name"; then
+    sudo chmod 755 "$dest"
+    echo "The $name file has been successfully loaded."
+    return 0
+  fi
+  echo "ERROR: failed to install $name" >&2
+  return 1
+}
+
 # sudo resets the environment, so NEEDRESTART_* from the launch command never
 # reaches apt. The "Pending kernel upgrade" whiptail then hangs on `yes '' |`.
 sudo() {
@@ -230,7 +254,7 @@ fi
 
 sudo apt install lsb-release -y
 
-sudo apt install -y socat curl
+sudo apt install -y socat curl zip unzip
 
 
 CURRENT_SERVER_IP=$(curl -s http://checkip.amazonaws.com)
@@ -266,6 +290,21 @@ sudo a2enmod proxy
 sudo a2enmod proxy_http
 sudo a2enmod headers
 sudo a2enmod remoteip
+sudo a2enmod setenvif
+sudo tee /etc/apache2/conf-available/killbot-logformat.conf > /dev/null <<'EOF'
+# combined + kbRes kbUserID kbSession kbCheck (NONE if the cookie is missing)
+SetEnvIf Request_URI "^" KB_LOG_KBRES=NONE
+SetEnvIf Request_URI "^" KB_LOG_KBUSERID=NONE
+SetEnvIf Request_URI "^" KB_LOG_KBSESSION=NONE
+SetEnvIf Request_URI "^" KB_LOG_KBCHECK=NONE
+SetEnvIf Cookie "(?:^|;\s*)kbRes=([^;]+)" KB_LOG_KBRES=$1
+SetEnvIf Cookie "(?:^|;\s*)kbUserID=([^;]+)" KB_LOG_KBUSERID=$1
+SetEnvIf Cookie "(?:^|;\s*)kbSession=([^;]+)" KB_LOG_KBSESSION=$1
+SetEnvIf Cookie "(?:^|;\s*)kbCheck=([^;]+)" KB_LOG_KBCHECK=$1
+
+LogFormat "%h %l %u %t \"%r\" %>s %O \"%{Referer}i\" \"%{User-Agent}i\" %{KB_LOG_KBRES}e %{KB_LOG_KBUSERID}e %{KB_LOG_KBSESSION}e %{KB_LOG_KBCHECK}e" combined_kb
+EOF
+sudo a2enconf killbot-logformat >/dev/null
 #sudo a2dismod status
 sudo apt install logrotate -y
 sudo apt install libapache2-mod-security2 -y
@@ -1175,8 +1214,10 @@ sudo tee /opt/killbot/settings.php > /dev/null <<'EOF'
 // Set to false to refuse every POST, never write keys, and never delete local certbot certs.
 $kb_accept_centralized_certs = true;
 
-// Allow /opt/killbot/install.sh to configure or reconfigure sites (including via kb.php).
-// Set to false so install.sh exits immediately and does not change site config.
+// Allow kb.php to change this server (install/reconfigure a site, enable/disable
+// protection, delete a cert, write allowlists). Set to false so kb.php only
+// answers version (type=v) and diagnostics (type=health_check / check_host).
+// install.sh itself does not read this flag — lock the web API, not the CLI.
 $kb_allow_install_sh = true;
 
 // IPs allowed to POST certificates to le_receive_cert.php
@@ -1442,7 +1483,10 @@ FILE="/opt/killbot/dns_provider_hint.sh"
         exit 1
     fi
 
-sudo chmod +x /opt/killbot/check_killbot_reverse_proxy.sh /opt/killbot/setup_killbot_reverse_proxy.sh /opt/killbot/update-postrouting.sh /opt/killbot/update-symmetric-ip.sh /opt/killbot/check_host_curl.sh /opt/killbot/read_apache_log.sh
+kb_install_local_script /opt/killbot/backup_send.sh backup_send.sh || exit 1
+kb_install_local_script /opt/killbot/backup_restore.sh backup_restore.sh || exit 1
+
+sudo chmod +x /opt/killbot/check_killbot_reverse_proxy.sh /opt/killbot/setup_killbot_reverse_proxy.sh /opt/killbot/update-postrouting.sh /opt/killbot/update-symmetric-ip.sh /opt/killbot/check_host_curl.sh /opt/killbot/read_apache_log.sh /opt/killbot/backup_send.sh /opt/killbot/backup_restore.sh
 sudo chown root:root /opt/killbot/check_host_curl.sh /opt/killbot/read_apache_log.sh
 sudo chmod 755 /opt/killbot/check_host_curl.sh /opt/killbot/read_apache_log.sh
 sudo chmod 644 /opt/killbot/dns_provider_hint.sh
@@ -2416,7 +2460,7 @@ configContent="<VirtualHost 127.0.0.1:8443>
     AllowEncodedSlashes NoDecode
 
     ErrorLog /var/log/apache2/\$domain.error.log
-    CustomLog /var/log/apache2/\$domain.access.log combined
+    CustomLog /var/log/apache2/\$domain.access.log combined_kb
 
     # verification.php restrictions
     <Files \"/opt/killbot/html/verification.php\">
@@ -2908,6 +2952,9 @@ KILLBOT_INSTALL_SCRIPT="/opt/killbot/install.sh"
 KILLBOT_CERT_DELETE_SCRIPT="/opt/killbot/cert_delete.sh"
 # Path to killbot settings
 SETTINGS_DIR="/opt/killbot/settings"
+KB_ENC_MOUNT_SCRIPT="/opt/killbot/install/kb_enc_mount_to_html_ram.sh"
+KB_HEALTH_CHECK_SCRIPT="/opt/killbot/server_health_check.sh"
+KB_HEALTH_STATUS_FILE="/var/www/html/data.killbot.ru/index.html"
 # Prefix for nginx reverse-proxy configs (loaded before *.domain)
 REVERSE_PROXY_NGINX_PREFIX="000-"
 
@@ -3247,11 +3294,66 @@ check_internet() {
     echo "Internet: OK"
 }
 
+html_needs_decrypt() {
+    if [ ! -f "\$KB_ENC_MOUNT_SCRIPT" ]; then
+        return 1
+    fi
+    if [ ! -d "/var/www/html" ]; then
+        return 0
+    fi
+    if [ -f "/var/www/enc/gocryptfs.conf" ]; then
+        if findmnt -rno TARGET /var/www/html >/dev/null 2>&1; then
+            return 1
+        fi
+        return 0
+    fi
+    return 1
+}
+
+check_html_decrypted() {
+    if html_needs_decrypt; then
+        echo "Error: /var/www/html is missing or encrypted."
+        echo "Decrypt and start KillBot with: kb start"
+        return 1
+    fi
+    return 0
+}
+
+ensure_html_decrypted() {
+    if html_needs_decrypt; then
+        echo "Decrypting /var/www/html (gocryptfs will ask for the passphrase)..."
+        if ! "\$KB_ENC_MOUNT_SCRIPT"; then
+            echo "Error: failed to decrypt /var/www/html."
+            return 1
+        fi
+    fi
+    return 0
+}
+
+check_solver_health() {
+    if [ ! -f "\$KB_HEALTH_CHECK_SCRIPT" ]; then
+        return 0
+    fi
+    if [ ! -f "\$KB_HEALTH_STATUS_FILE" ]; then
+        echo "Error: solver health status missing (\$KB_HEALTH_STATUS_FILE)."
+        return 1
+    fi
+    local body
+    body=\$(tr -d '\\r\\n' < "\$KB_HEALTH_STATUS_FILE" 2>/dev/null || true)
+    if [ "\$body" = "ok1." ]; then
+        echo "Solver health (data.killbot.ru/index.html): ok1."
+        return 0
+    fi
+    echo "Error: solver health check failed:"
+    echo "\$body"
+    return 1
+}
+
 status() {
     check_internet
 
     local failed=0
-    local f apache_out nginx_out http_code server_ip php_ver php_ok
+    local f apache_out nginx_out http_code server_ip php_ver php_ok skip_html_files=0
 
     php_ver=\$(php -r 'echo PHP_MAJOR_VERSION.".".PHP_MINOR_VERSION.".".PHP_RELEASE_VERSION;' 2>/dev/null || true)
     php_ok=0
@@ -3268,12 +3370,19 @@ status() {
         failed=1
     fi
 
+    if ! check_html_decrypted; then
+        failed=1
+        skip_html_files=1
+    fi
+
+    if [ "\$skip_html_files" -eq 0 ]; then
     for f in kb.php empty.php le_receive_cert.php empty_en.html empty_ru.html; do
         if [ ! -f "/var/www/html/\$f" ]; then
             echo "Error: missing file /var/www/html/\$f"
             failed=1
         fi
     done
+    fi
 
     if [ ! -f "\$KILLBOT_INSTALL_SCRIPT" ]; then
         echo "Error: missing file \$KILLBOT_INSTALL_SCRIPT"
@@ -3326,6 +3435,12 @@ status() {
         fi
     fi
 
+    if [ "\$skip_html_files" -eq 0 ]; then
+        if ! check_solver_health; then
+            failed=1
+        fi
+    fi
+
     if [ "\$failed" -eq 0 ]; then
         echo "KillBot is installed correctly."
         return 0
@@ -3336,6 +3451,10 @@ status() {
 start() {
     local failed=0
     local f apache_out nginx_out
+
+    if ! ensure_html_decrypted; then
+        return 1
+    fi
 
     for f in kb.php empty.php le_receive_cert.php empty_en.html empty_ru.html; do
         if [ ! -f "/var/www/html/\$f" ]; then
@@ -3467,12 +3586,6 @@ fi
 sudo tee /opt/killbot/install.sh > /dev/null <<EOF
 #!/bin/bash
 
-KB_SETTINGS="/opt/killbot/settings.php"
-if [[ -f "\$KB_SETTINGS" ]] && grep -E '^[[:space:]]*\\\$kb_allow_install_sh[[:space:]]*=' "\$KB_SETTINGS" | grep -Eq '=[[:space:]]*(false|FALSE|0)[[:space:]]*;'; then
-    echo "ERROR: site configuration via install.sh is disabled in /opt/killbot/settings.php (kb_allow_install_sh = false)" >&2
-    exit 1
-fi
-
 require_kb_status() {
     if [[ "\${KB_STATUS_CHECKED:-0}" == "1" ]]; then
         return 0
@@ -3498,6 +3611,22 @@ require_kb_status() {
 }
 
 require_kb_status
+
+sudo a2enmod setenvif >/dev/null 2>&1 || true
+sudo tee /etc/apache2/conf-available/killbot-logformat.conf > /dev/null <<'KBLOGFMT'
+# combined + kbRes kbUserID kbSession kbCheck (NONE if the cookie is missing)
+SetEnvIf Request_URI "^" KB_LOG_KBRES=NONE
+SetEnvIf Request_URI "^" KB_LOG_KBUSERID=NONE
+SetEnvIf Request_URI "^" KB_LOG_KBSESSION=NONE
+SetEnvIf Request_URI "^" KB_LOG_KBCHECK=NONE
+SetEnvIf Cookie "(?:^|;\s*)kbRes=([^;]+)" KB_LOG_KBRES=\$1
+SetEnvIf Cookie "(?:^|;\s*)kbUserID=([^;]+)" KB_LOG_KBUSERID=\$1
+SetEnvIf Cookie "(?:^|;\s*)kbSession=([^;]+)" KB_LOG_KBSESSION=\$1
+SetEnvIf Cookie "(?:^|;\s*)kbCheck=([^;]+)" KB_LOG_KBCHECK=\$1
+
+LogFormat "%h %l %u %t \"%r\" %>s %O \"%{Referer}i\" \"%{User-Agent}i\" %{KB_LOG_KBRES}e %{KB_LOG_KBUSERID}e %{KB_LOG_KBSESSION}e %{KB_LOG_KBCHECK}e" combined_kb
+KBLOGFMT
+sudo a2enconf killbot-logformat >/dev/null 2>&1 || true
 
 declare email=""
 declare token=""
@@ -4211,6 +4340,8 @@ else
     echo "The Apache server for the site \$domain_without_www is configured to the localhost directory \$folder"
 fi
 
+sed -i 's|\.access\.log combined\$|.access.log combined_kb|' /etc/apache2/sites-available/\$domain_without_www-killbot.conf
+
 apache_check=\$(sudo apachectl configtest 2>&1)
 
 if echo "\$apache_check" | grep -q "Syntax OK"; then
@@ -4645,10 +4776,13 @@ FILE="/opt/killbot/dns_provider_hint.sh"
         exit 1
     fi
 
-sudo chmod +x /opt/killbot/check_killbot_reverse_proxy.sh /opt/killbot/setup_killbot_reverse_proxy.sh /opt/killbot/update-postrouting.sh /opt/killbot/update-symmetric-ip.sh /opt/killbot/check_host_curl.sh /opt/killbot/read_apache_log.sh
+    kb_download /opt/killbot/backup_send.sh "killbot_dns/backup_send.sh" || kb_download /opt/killbot/backup_send.sh "sh/backup_send.sh"
+    kb_download /opt/killbot/backup_restore.sh "killbot_dns/backup_restore.sh" || kb_download /opt/killbot/backup_restore.sh "sh/backup_restore.sh"
+
+sudo chmod +x /opt/killbot/check_killbot_reverse_proxy.sh /opt/killbot/setup_killbot_reverse_proxy.sh /opt/killbot/update-postrouting.sh /opt/killbot/update-symmetric-ip.sh /opt/killbot/check_host_curl.sh /opt/killbot/read_apache_log.sh /opt/killbot/backup_send.sh /opt/killbot/backup_restore.sh
 sudo chmod 644 /opt/killbot/dns_provider_hint.sh
 sudo chown root:root /opt/killbot/check_host_curl.sh /opt/killbot/read_apache_log.sh /opt/killbot/install.sh /etc/init.d/kb 2>/dev/null || true
-sudo chmod 755 /opt/killbot/check_host_curl.sh /opt/killbot/read_apache_log.sh /opt/killbot/install.sh /etc/init.d/kb 2>/dev/null || true
+sudo chmod 755 /opt/killbot/check_host_curl.sh /opt/killbot/read_apache_log.sh /opt/killbot/install.sh /etc/init.d/kb /opt/killbot/backup_send.sh /opt/killbot/backup_restore.sh 2>/dev/null || true
 sudo chmod +x /opt/killbot/f2b/subnet-monitor.sh /opt/killbot/cert_delete.sh /opt/killbot/on_killbot_protection.sh /opt/killbot/off_killbot_protection.sh /opt/killbot/official_allowed_ips.sh /opt/killbot/cert_wildcard_new.sh /opt/killbot/clean_up_unused_certs.sh /opt/killbot/UpdateAll.sh
 rm -f /opt/killbot/acme_check_api.sh /opt/killbot/renew_wildcard.sh /etc/cron.d/killbot-wildcard-renewal
 sudo chmod +x  /opt/killbot/f2b/block_all_countries_except.sh  /opt/killbot/f2b/check_apache_and_block.sh  /opt/killbot/f2b/unblock_traffic.sh /opt/killbot/official_allowed_ips.sh
@@ -5052,6 +5186,17 @@ if (\$type=="v"){
     exit;
 }
 
+\$kb_allow_install_sh = true;
+if (is_file("/opt/killbot/settings.php")) {
+    include "/opt/killbot/settings.php";
+}
+\$kb_config_locked = (\$kb_allow_install_sh === false || \$kb_allow_install_sh === 0 || \$kb_allow_install_sh === "0" || \$kb_allow_install_sh === "false");
+\$kb_readonly_types = array("v", "check_host", "health_check", "healf_check");
+if (\$kb_config_locked && !in_array(\$type, \$kb_readonly_types, true)) {
+    echo "ERROR: server configuration via kb.php is disabled in /opt/killbot/settings.php (kb_allow_install_sh = false)";
+    exit;
+}
+
 \$domain = kb_sanitize(\$_GET["domain"] ?? null);
 \$cdn_domain = kb_sanitize(\$_GET["cdn_domain"] ?? null);
 \$cdn_paths = kb_sanitize(\$_GET["cdn_paths"] ?? null);
@@ -5076,6 +5221,15 @@ if (\$type=="v"){
 
 if (!\$le) \$le = "0";
 if (!\$www) \$www = "0";
+
+if (\$type == "health_check" || \$type == "healf_check") {
+    if (\$domain && \$ip && filter_var(\$ip, FILTER_VALIDATE_IP) && in_array(\$protocol, ['http', 'https'], true)) {
+        \$type = "check_host";
+    } else {
+        echo "OK";
+        exit;
+    }
+}
 
 if (\$type == "check_host") {
     if (!\$domain) {
@@ -5415,6 +5569,7 @@ echo "# Clean unuser certs for KillBot
 * * * * * root /opt/killbot/check_killbot_reverse_proxy.sh >> /var/log/killbot/check_killbot_reverse_proxy.log 2>&1
 # Reload nginx/apache after Let's Encrypt cert files are replaced on the LE server
 15 3 * * 3,6 root /etc/init.d/kb reload >> /var/log/killbot/kb-reload.log 2>&1
+40 3 * * * root /opt/killbot/backup_send.sh >> /var/log/killbot/backup-send.log 2>&1
 " | sudo tee "$CRON_FILE" > /dev/null
 
 # flush iptables if any subnets were blocked
