@@ -52,11 +52,6 @@ kb_install_local_script() {
     echo "Installed $name from installer directory."
     return 0
   fi
-  if kb_download "$dest" "killbot_dns/$name"; then
-    sudo chmod 755 "$dest"
-    echo "The $name file has been successfully loaded."
-    return 0
-  fi
   if kb_download "$dest" "sh/$name"; then
     sudo chmod 755 "$dest"
     echo "The $name file has been successfully loaded."
@@ -4776,8 +4771,8 @@ FILE="/opt/killbot/dns_provider_hint.sh"
         exit 1
     fi
 
-    kb_download /opt/killbot/backup_send.sh "killbot_dns/backup_send.sh" || kb_download /opt/killbot/backup_send.sh "sh/backup_send.sh"
-    kb_download /opt/killbot/backup_restore.sh "killbot_dns/backup_restore.sh" || kb_download /opt/killbot/backup_restore.sh "sh/backup_restore.sh"
+    kb_download /opt/killbot/backup_send.sh "sh/backup_send.sh"
+    kb_download /opt/killbot/backup_restore.sh "sh/backup_restore.sh"
 
 sudo chmod +x /opt/killbot/check_killbot_reverse_proxy.sh /opt/killbot/setup_killbot_reverse_proxy.sh /opt/killbot/update-postrouting.sh /opt/killbot/update-symmetric-ip.sh /opt/killbot/check_host_curl.sh /opt/killbot/read_apache_log.sh /opt/killbot/backup_send.sh /opt/killbot/backup_restore.sh
 sudo chmod 644 /opt/killbot/dns_provider_hint.sh
