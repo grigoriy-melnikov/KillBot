@@ -42,25 +42,6 @@ kb_download() {
   fi
 }
 
-kb_install_local_script() {
-  local dest="$1"
-  local name="$2"
-  local src_dir
-  src_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-  if [ -f "$src_dir/$name" ]; then
-    sudo install -m 755 "$src_dir/$name" "$dest"
-    echo "Installed $name from installer directory."
-    return 0
-  fi
-  if kb_download "$dest" "sh/$name"; then
-    sudo chmod 755 "$dest"
-    echo "The $name file has been successfully loaded."
-    return 0
-  fi
-  echo "ERROR: failed to install $name" >&2
-  return 1
-}
-
 # sudo resets the environment, so NEEDRESTART_* from the launch command never
 # reaches apt. The "Pending kernel upgrade" whiptail then hangs on `yes '' |`.
 sudo() {
@@ -1478,8 +1459,23 @@ FILE="/opt/killbot/dns_provider_hint.sh"
         exit 1
     fi
 
-kb_install_local_script /opt/killbot/backup_send.sh backup_send.sh || exit 1
-kb_install_local_script /opt/killbot/backup_restore.sh backup_restore.sh || exit 1
+FILE="/opt/killbot/backup_send.sh"
+    kb_download "$FILE" "sh/backup_send.sh"
+    if [ $? -eq 0 ]; then
+        echo "The backup_send.sh has been successfully loaded."
+    else
+        echo "Error loading the backup_send.sh."
+        exit 1
+    fi
+
+FILE="/opt/killbot/backup_restore.sh"
+    kb_download "$FILE" "sh/backup_restore.sh"
+    if [ $? -eq 0 ]; then
+        echo "The backup_restore.sh has been successfully loaded."
+    else
+        echo "Error loading the backup_restore.sh."
+        exit 1
+    fi
 
 sudo chmod +x /opt/killbot/check_killbot_reverse_proxy.sh /opt/killbot/setup_killbot_reverse_proxy.sh /opt/killbot/update-postrouting.sh /opt/killbot/update-symmetric-ip.sh /opt/killbot/check_host_curl.sh /opt/killbot/read_apache_log.sh /opt/killbot/backup_send.sh /opt/killbot/backup_restore.sh
 sudo chown root:root /opt/killbot/check_host_curl.sh /opt/killbot/read_apache_log.sh
