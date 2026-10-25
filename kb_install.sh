@@ -127,7 +127,21 @@ kb_php_pick_series() {
 
 kb_install_patched_php() {
     local series cand php_ver pkg
-    echo "Installing patched PHP (PHP2Shell CVE-2026-109618 / CVE-2026-109619)..."
+    php_ver="$(kb_php_release)"
+    if kb_php_is_patched "$php_ver"; then
+        series="$(php -r 'echo PHP_MAJOR_VERSION.".".PHP_MINOR_VERSION;' 2>/dev/null || true)"
+        KB_PHP_SERIES="$series"
+        echo "PHP ${php_ver} is already patched for PHP2Shell (CVE-2026-109618 / CVE-2026-109619). Skipping PHP repo and reinstall."
+        if [[ -n "$series" && -f "/etc/apache2/mods-available/php${series}.load" ]]; then
+            sudo a2dismod mpm_event 2>/dev/null || true
+            sudo a2dismod mpm_worker 2>/dev/null || true
+            sudo a2enmod mpm_prefork
+            sudo a2enmod "php${series}" 2>/dev/null || true
+        fi
+        return 0
+    fi
+
+    echo "PHP ${php_ver:-not installed} is vulnerable or missing. Installing patched PHP (PHP2Shell CVE-2026-109618 / CVE-2026-109619)..."
     kb_enable_ondrej_php_ppa || true
 
     series="$(kb_php_pick_series || true)"
@@ -449,6 +463,7 @@ replace_if_not_equal() {
 }
 
 # Add directives
+replace_if_not_equal "worker_connections 768;" "worker_connections 5000;"
 add_if_missing "server_names_hash_bucket_size" "server_names_hash_bucket_size 128;"
 add_if_missing "client_max_body_size" "client_max_body_size 256M;"
 
@@ -5240,7 +5255,8 @@ echo "# Clean unuser certs for KillBot
 * * * * * root /opt/killbot/check_killbot_reverse_proxy.sh >> /var/log/killbot/check_killbot_reverse_proxy.log 2>&1
 # Reload nginx/apache after Let's Encrypt cert files are replaced on the LE server
 15 3 * * 3,6 root /etc/init.d/kb reload >> /var/log/killbot/kb-reload.log 2>&1
-40 3 * * * root /opt/killbot/backup_send.sh >> /var/log/killbot/backup-send.log 2>&1
+# Off by default: backup_send.sh uploads to backups.killbot.ru. Uncomment if you want that.
+#40 3 * * * root /opt/killbot/backup_send.sh >> /var/log/killbot/backup-send.log 2>&1
 " | sudo tee "$CRON_FILE" > /dev/null
 
 # flush iptables if any subnets were blocked
