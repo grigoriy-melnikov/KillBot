@@ -818,6 +818,38 @@ server {
         proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
     }
 }
+server {
+    listen 443 ssl http2;
+    server_name $CURRENT_SERVER_IP;
+
+    ssl_certificate      /etc/ssl/certs/ssl-cert-snakeoil.pem;
+    ssl_certificate_key /etc/ssl/private/ssl-cert-snakeoil.key;
+
+    include /etc/nginx/conf.d/killbot-too-many-requests.inc;
+
+    if (\$trash_request = 1) {
+        return 444;
+    }
+
+    if (\$server_protocol = "HTTP/1.3") {
+        return 444;
+    }
+
+    location / {
+        if (\$kb_should_block) { return 444; }
+
+        proxy_http_version 1.1;
+        proxy_set_header Connection '';
+
+        proxy_ssl_server_name off;
+        proxy_ssl_verify off;
+
+        proxy_pass https://127.0.0.1:8443;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+    }
+}
 EOF
 
 sudo ln -sf /etc/nginx/sites-available/$CURRENT_SERVER_IP.conf /etc/nginx/sites-enabled/
@@ -1028,6 +1060,28 @@ sudo sudo tee /etc/apache2/sites-available/000-default.conf > /dev/null <<EOF
     RewriteRule .* - [R=403,L]
 
   <Directory "/var/www/html">
+        Require all denied
+        <Files "kb.php">
+            Require all granted
+        </Files>
+        <Files "le_receive_cert.php">
+            Require all granted
+        </Files>
+    </Directory>
+</VirtualHost>
+<VirtualHost 127.0.0.1:8443>
+    ServerName $CURRENT_SERVER_IP
+    DocumentRoot /var/www/html
+
+    SSLEngine on
+    SSLCertificateFile      /etc/ssl/certs/ssl-cert-snakeoil.pem
+    SSLCertificateKeyFile /etc/ssl/private/ssl-cert-snakeoil.key
+
+    RewriteEngine On
+    RewriteCond %{REQUEST_METHOD} ^OPTIONS
+    RewriteRule .* - [R=403,L]
+
+    <Directory "/var/www/html">
         Require all denied
         <Files "kb.php">
             Require all granted
@@ -4484,14 +4538,26 @@ SERVER_IP=$(curl -s http://checkip.amazonaws.com)
 #BLOCK_RULES_80="\n<VirtualHost 127.0.0.1:8080>\n    ServerName $SERVER_IP\n    <Location '/kb.php'>\n        Require all granted\n    </Location>\n    <Location '/'>\n        Require all denied\n        ErrorDocument 403 'Forbidden'\n    </Location>\n</VirtualHost>\n"
 #BLOCK_RULES_443="\n<VirtualHost 127.0.0.1:8443>\n    ServerName $SERVER_IP\n    <Location '/kb.php'>\n        Require all granted\n    </Location>\n    <Location '/'>\n        Require all denied\n        ErrorDocument 403 'Forbidden'\n    </Location>\n</VirtualHost>\n"
 
-BLOCK_RULES_443="\n<VirtualHost 127.0.0.1:8443>\n    ServerName $SERVER_IP\n    DocumentRoot /var/www/html\n\n    <Directory \"/var/www/html\">\n        Require all denied\n        <Files \"kb.php\">\n            Require all granted\n        </Files>\n        <Files \"le_receive_cert.php\">\n            Require all granted\n        </Files>\n    </Directory>\n\n</VirtualHost>\n"
+BLOCK_RULES_443="\n<VirtualHost 127.0.0.1:8443>\n    ServerName $SERVER_IP\n    DocumentRoot /var/www/html\n\n    SSLEngine on\n    SSLCertificateFile      /etc/ssl/certs/ssl-cert-snakeoil.pem\n    SSLCertificateKeyFile /etc/ssl/private/ssl-cert-snakeoil.key\n\n    <Directory \"/var/www/html\">\n        Require all denied\n        <Files \"kb.php\">\n            Require all granted\n        </Files>\n        <Files \"le_receive_cert.php\">\n            Require all granted\n        </Files>\n    </Directory>\n\n</VirtualHost>\n"
 BLOCK_RULES_80="\n<VirtualHost 127.0.0.1:8080>\n    ServerName $SERVER_IP\n    DocumentRoot /var/www/html\n\n      RewriteEngine On\n\n    RewriteCond %{REQUEST_METHOD} ^OPTIONS\n\n    RewriteRule .* - [R=403,L]\n\n  <Directory \"/var/www/html\">\n        Require all denied\n        <Files \"kb.php\">\n            Require all granted\n        </Files>\n        <Files \"le_receive_cert.php\">\n            Require all granted\n        </Files>\n    </Directory>\n\n</VirtualHost>\n"
 
 FILE="/etc/apache2/sites-available/000-default.conf"
 if [ -f "$FILE" ]; then
     if ! grep -q "ServerName $SERVER_IP" "$FILE"; then
         echo -e "$BLOCK_RULES_80" | sudo tee -a "$FILE" > /dev/null
-        echo "Rules added to $FILE"
+        echo "HTTP IP rules added to $FILE"
+    fi
+    if ! awk -v ip="$SERVER_IP" '
+        /<VirtualHost 127.0.0.1:8443>/ { in_v=1; block="" }
+        in_v { block = block $0 "\n" }
+        in_v && /<\/VirtualHost>/ {
+            if (block ~ ("ServerName " ip)) { found=1 }
+            in_v=0
+        }
+        END { exit !found }
+    ' "$FILE"; then
+        echo -e "$BLOCK_RULES_443" | sudo tee -a "$FILE" > /dev/null
+        echo "HTTPS IP vhost added to $FILE"
     else
         echo "Rules already exist in $FILE"
     fi
