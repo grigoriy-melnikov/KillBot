@@ -841,10 +841,7 @@ server {
         proxy_http_version 1.1;
         proxy_set_header Connection '';
 
-        proxy_ssl_server_name off;
-        proxy_ssl_verify off;
-
-        proxy_pass https://127.0.0.1:8443;
+        proxy_pass http://127.0.0.1:8080;
         proxy_set_header Host \$host;
         proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto \$scheme;
@@ -1019,6 +1016,8 @@ sudo sudo tee /etc/apache2/sites-available/000-default.conf > /dev/null <<EOF
 
 </VirtualHost>
 <VirtualHost 127.0.0.1:8443>
+    ServerName $CURRENT_SERVER_IP
+    ServerAlias 127.0.0.1 localhost
 
     ServerAdmin webmaster@localhost
     DocumentRoot /var/www/html
@@ -1071,6 +1070,7 @@ sudo sudo tee /etc/apache2/sites-available/000-default.conf > /dev/null <<EOF
 </VirtualHost>
 <VirtualHost 127.0.0.1:8443>
     ServerName $CURRENT_SERVER_IP
+    ServerAlias 127.0.0.1 localhost
     DocumentRoot /var/www/html
 
     SSLEngine on
@@ -1093,7 +1093,10 @@ sudo sudo tee /etc/apache2/sites-available/000-default.conf > /dev/null <<EOF
 </VirtualHost>
 EOF
 
-
+# 000-default-ssl is first in sites-enabled and becomes the default SSL vhost.
+# A leftover ServerName like \$SERVER_IP makes every HTTPS-to-Apache :8443
+# return 421 (SNI/Host mismatch). 000-default.conf already has :8443.
+sudo a2dissite 000-default-ssl >/dev/null 2>&1 || true
 
 sysctl --system
 sysctl net.ipv4.tcp_syncookies net.core.somaxconn net.ipv4.tcp_max_syn_backlog net.ipv4.tcp_synack_retries
@@ -4538,7 +4541,7 @@ SERVER_IP=$(curl -s http://checkip.amazonaws.com)
 #BLOCK_RULES_80="\n<VirtualHost 127.0.0.1:8080>\n    ServerName $SERVER_IP\n    <Location '/kb.php'>\n        Require all granted\n    </Location>\n    <Location '/'>\n        Require all denied\n        ErrorDocument 403 'Forbidden'\n    </Location>\n</VirtualHost>\n"
 #BLOCK_RULES_443="\n<VirtualHost 127.0.0.1:8443>\n    ServerName $SERVER_IP\n    <Location '/kb.php'>\n        Require all granted\n    </Location>\n    <Location '/'>\n        Require all denied\n        ErrorDocument 403 'Forbidden'\n    </Location>\n</VirtualHost>\n"
 
-BLOCK_RULES_443="\n<VirtualHost 127.0.0.1:8443>\n    ServerName $SERVER_IP\n    DocumentRoot /var/www/html\n\n    SSLEngine on\n    SSLCertificateFile      /etc/ssl/certs/ssl-cert-snakeoil.pem\n    SSLCertificateKeyFile /etc/ssl/private/ssl-cert-snakeoil.key\n\n    <Directory \"/var/www/html\">\n        Require all denied\n        <Files \"kb.php\">\n            Require all granted\n        </Files>\n        <Files \"le_receive_cert.php\">\n            Require all granted\n        </Files>\n    </Directory>\n\n</VirtualHost>\n"
+BLOCK_RULES_443="\n<VirtualHost 127.0.0.1:8443>\n    ServerName $SERVER_IP\n    ServerAlias 127.0.0.1 localhost\n    DocumentRoot /var/www/html\n\n    SSLEngine on\n    SSLCertificateFile      /etc/ssl/certs/ssl-cert-snakeoil.pem\n    SSLCertificateKeyFile /etc/ssl/private/ssl-cert-snakeoil.key\n\n    <Directory \"/var/www/html\">\n        Require all denied\n        <Files \"kb.php\">\n            Require all granted\n        </Files>\n        <Files \"le_receive_cert.php\">\n            Require all granted\n        </Files>\n    </Directory>\n\n</VirtualHost>\n"
 BLOCK_RULES_80="\n<VirtualHost 127.0.0.1:8080>\n    ServerName $SERVER_IP\n    DocumentRoot /var/www/html\n\n      RewriteEngine On\n\n    RewriteCond %{REQUEST_METHOD} ^OPTIONS\n\n    RewriteRule .* - [R=403,L]\n\n  <Directory \"/var/www/html\">\n        Require all denied\n        <Files \"kb.php\">\n            Require all granted\n        </Files>\n        <Files \"le_receive_cert.php\">\n            Require all granted\n        </Files>\n    </Directory>\n\n</VirtualHost>\n"
 
 FILE="/etc/apache2/sites-available/000-default.conf"
