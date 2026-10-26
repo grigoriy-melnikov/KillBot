@@ -18,7 +18,9 @@ $kb_windows_1251_domains = [
 $kb_extra_server = '{domain}/';
 $kb_extra_server_used = false;
 
-$kb_default_server = 'https://data.killbot.ru';
+// Last-resort KillBot server. Used only if every other server in the list
+// failed to answer (ping / fetch timeout).
+$kb_reserved_server = 'https://data.killbot.ru';
 
 // Hide "KillBot Free" on the spinner when the subscription expired.
 // true = show the label (default). false = do not write it on the page.
@@ -37,6 +39,16 @@ $kb_page_description = '';
 // KillBot allowed paths (otherwise KillBot blocks the image request as a bot).
 $kb_page_image = '';
 
+// Data processing policy link and anchor text (ru / en / zh).
+// Placeholders: {ip} {user_agent} {domain}
+// Relative path (/policy) or host/path ({domain}/policy) becomes https://...
+$kb_privacy_url = 'https://killbot.ru/data_privacy';
+$kb_privacy_url_en = 'https://my.kill-bot.net/data_privacy';
+$kb_privacy_url_zh = 'https://my.kill-bot.net/data_privacy';
+$kb_privacy_text = 'KillBot · Политика обработки технических данных';
+$kb_privacy_text_en = 'KillBot · Technical Data Processing Policy';
+$kb_privacy_text_zh = 'KillBot · 技术数据处理政策';
+
 // Example: own messenger preview for domain.ru / *.domain.ru (no JS, they keep HTML title).
 // Copy the if-block for each extra domain and put your own title/description/image there.
 // Empty description or image = that meta tag is not written.
@@ -47,6 +59,12 @@ if (!empty($kb_page_host) && ($kb_page_host === 'domain.ru' || substr($kb_page_h
     $kb_page_title_js_zh = 'This is the browser JS title for {domain}';
     $kb_page_description = 'This is the description for messenger preview on {domain}';
     $kb_page_image = '/preview.jpg';
+    $kb_privacy_url = 'https://{domain}/data_privacy';
+    $kb_privacy_url_en = 'https://{domain}/data_privacy';
+    $kb_privacy_url_zh = 'https://{domain}/data_privacy';
+    $kb_privacy_text = 'KillBot · Политика обработки технических данных';
+    $kb_privacy_text_en = 'KillBot · Technical Data Processing Policy';
+    $kb_privacy_text_zh = 'KillBot · 技术数据处理政策';
 }
 
 // if (!empty($kb_page_host) && ($kb_page_host === 'shop.com' || substr($kb_page_host, -strlen('.shop.com')) === '.shop.com')) {
@@ -59,7 +77,8 @@ if (!empty($kb_page_host) && ($kb_page_host === 'domain.ru' || substr($kb_page_h
 // Persist kbUserID, kbRes, kbLoaded, kbT cookies. Set false to skip them.
 $kb_save_result_cookies = true;
 
-// Shared KillBot Yandex Metrika counter. Set used to false so visitor data is not sent there.
+// Shared Yandex Metrika counter for bot visits only (counter id + snapshot 999999).
+// All sites connected to this server send bot hits here. Set used to false to disable.
 $kb_own_metrika_used = true;
 $kb_own_metrika = 110994261;
 
