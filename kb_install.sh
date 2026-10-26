@@ -882,8 +882,7 @@ server {
         proxy_pass http://127.0.0.1:8080;
         proxy_set_header Host "127.0.0.1";
         proxy_buffering off;
-        allow 127.0.0.1;
-        allow 31.211.65.236;
+        allow 127.0.0.1;        
         deny all;
     }
 
@@ -961,8 +960,7 @@ server {
         proxy_pass http://127.0.0.1:8080;
         proxy_set_header Host "127.0.0.1";
         proxy_buffering off;
-        allow 127.0.0.1;
-        allow 31.211.65.236;
+        allow 127.0.0.1;        
         deny all;
     }
 
@@ -1239,7 +1237,6 @@ done
 
 rm -rf /var/log/apache2/*
 rm -rf /var/log/killbot/*
-rm -f /opt/killbot/killbot_revers
 
 
 sudo systemctl restart apache2
@@ -1273,6 +1270,22 @@ sudo chown www-data:www-data /opt/killbot/ssl
 sudo chmod 775 /opt/killbot/ssl
 
 echo "  permissions OK: /opt/killbot/ssl (www-data:www-data 775)"
+
+# Shared Killbot backends. Keep existing file (may be customized).
+if [ ! -s /opt/killbot/killbot_revers ]; then
+  cat > /opt/killbot/killbot_revers <<'EOC'
+10052024.ru
+r1.kill-bot.ru
+data.killbot.ru
+r3.nl.kill-bot.ru
+r4.us.kill-bot.ru
+r6.sg.kill-bot.net
+EOC
+  chmod 644 /opt/killbot/killbot_revers
+  echo "Created /opt/killbot/killbot_revers with default Killbot backends"
+else
+  echo "Keeping existing /opt/killbot/killbot_revers"
+fi
 
 # Create the countries config only if the file is missing
 if [ ! -f /opt/killbot/f2b/block_all_countries_except.config ]; then  
@@ -1350,7 +1363,7 @@ $kb_accept_centralized_certs = true;
 $kb_allow_install_sh = true;
 
 // IPs allowed to POST certificates to le_receive_cert.php
-$kb_le_allowed_server_ips = ['45.66.116.213', '31.211.65.236'];
+$kb_le_allowed_server_ips = ['45.66.116.213'];
 
 $kb_le_ssl_base_dir = '/opt/killbot/ssl';
 $kb_le_letsencrypt_dir = '/etc/letsencrypt';

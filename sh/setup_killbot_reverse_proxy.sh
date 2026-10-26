@@ -6,7 +6,7 @@
 #
 #   -y  skip the "Enter..." pause after instructions (unattended)
 #
-# /opt/killbot/killbot_revers                        — shared Killbot backends (one domain per line)
+# /opt/killbot/killbot_revers                        — shared Killbot backends (created by kb_install.sh)
 # /opt/killbot/settings/SITE/killbot_revers          — rebuilt on every run: r1.SITE:backend, r2.SITE:backend, …
 # Nginx reverse proxy — only with a wildcard in /opt/killbot/ssl/SITE_DOMAIN/ (fullchain.pem + privkey.pem).
 # Nginx configs: /etc/nginx/sites-available/000-{proxy_fqdn}.conf (000- prefix — loaded before *.SITE)
@@ -48,15 +48,6 @@ for _dns_hint in "${_SCRIPT_DIR}/dns_provider_hint.sh" "/opt/killbot/dns_provide
     fi
 done
 unset _dns_hint
-
-BACKEND_SERVERS=(
-    "https://10052024.ru"
-    "https://r1.kill-bot.ru"
-    "https://data.killbot.ru"
-    "https://r3.nl.kill-bot.ru"
-    "https://r4.us.kill-bot.ru"
-    "https://r6.sg.kill-bot.net"
-)
 
 # Check proxy A records only via a public resolver (Google DNS by default)
 DNSServer="${DNSServer:-8.8.8.8}"
@@ -308,17 +299,13 @@ strip_scheme() {
 }
 
 ensure_global_backends() {
-    mkdir -p "$(dirname "${GLOBAL_BACKENDS_FILE}")"
     if [[ -s "${GLOBAL_BACKENDS_FILE}" ]]; then
         return 0
     fi
-    local url host
-    : > "${GLOBAL_BACKENDS_FILE}"
-    for url in "${BACKEND_SERVERS[@]}"; do
-        host="$(strip_scheme "$url")"
-        [[ -n "$host" ]] && echo "$host" >> "${GLOBAL_BACKENDS_FILE}"
-    done
-    chmod 644 "${GLOBAL_BACKENDS_FILE}"
+    echo "ERROR: ${GLOBAL_BACKENDS_FILE} is missing or empty." >&2
+    echo "       Create it with Killbot backends (one host per line), then re-run." >&2
+    echo "       The installer writes the default list to this file." >&2
+    exit 1
 }
 
 read_global_backends() {
