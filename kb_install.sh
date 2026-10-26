@@ -4617,16 +4617,19 @@ SUDOERS_DROP=(
     "www-data ALL=(ALL) NOPASSWD: /opt/killbot/read_apache_log.sh"
 )
 # visudo rejects files in world-writable dirs (/tmp). Keep the check copy in /root.
+# Check the rewritten main file without @includedir so a foreign drop-in
+# (wrong mode or syntax) cannot block the cleanup.
 SUDOERS_TMP="/root/.killbot-sudoers.check"
 grep -Fxv -f <(printf '%s\n' "${SUDOERS_DROP[@]}") /etc/sudoers > "$SUDOERS_TMP" || true
-if ! visudo -c -f "$SUDOERS_TMP"; then
+sed -E '/^[[:space:]]*[@#]includedir[[:space:]]/d' "$SUDOERS_TMP" > "${SUDOERS_TMP}.noint"
+if ! visudo -c -f "${SUDOERS_TMP}.noint"; then
     echo "ERROR: sudoers cleanup failed validation; /etc/sudoers left unchanged" >&2
-    rm -f "$SUDOERS_TMP"
+    rm -f "$SUDOERS_TMP" "${SUDOERS_TMP}.noint"
     exit 1
 fi
 cat "$SUDOERS_TMP" > /etc/sudoers
 chmod 440 /etc/sudoers
-rm -f "$SUDOERS_TMP"
+rm -f "$SUDOERS_TMP" "${SUDOERS_TMP}.noint"
 
 # Quoted heredoc + strip CR so Windows line endings cannot break visudo.
 # Validate the fragment in /root first (visudo skips names with '.' in sudoers.d).
@@ -4653,12 +4656,25 @@ cp "$SUDOERS_DROPIN" /etc/sudoers.d/killbot
 rm -f "$SUDOERS_DROPIN"
 chown root:root /etc/sudoers.d/killbot
 chmod 440 /etc/sudoers.d/killbot
-if ! visudo -c; then
-    echo "ERROR: sudoers validation failed after writing /etc/sudoers.d/killbot" >&2
-    echo "Other files in /etc/sudoers.d:" >&2
+# Full visudo -c also parses every other drop-in. sudo already ignores
+# fragments with mode != 0440; do not chmod them (that would enable rules
+# that are currently ignored) and do not roll back our valid killbot file.
+visudo_rc=0
+visudo_out="$(visudo -c 2>&1)" || visudo_rc=$?
+echo "$visudo_out"
+if [ "$visudo_rc" -ne 0 ]; then
+    if echo "$visudo_out" | grep -F '/etc/sudoers.d/killbot:' | grep -qv 'parsed OK'; then
+        echo "ERROR: /etc/sudoers.d/killbot is invalid" >&2
+        rm -f /etc/sudoers.d/killbot
+        exit 1
+    fi
+    if echo "$visudo_out" | grep -F '/etc/sudoers:' | grep -qv 'parsed OK'; then
+        echo "ERROR: /etc/sudoers failed visudo after rewrite" >&2
+        exit 1
+    fi
+    echo "WARNING: visudo -c reported problems in files other than /etc/sudoers.d/killbot." >&2
+    echo "WARNING: sudo ignores drop-ins that are not mode 0440; leaving those files unchanged." >&2
     ls -la /etc/sudoers.d >&2 || true
-    rm -f /etc/sudoers.d/killbot
-    exit 1
 fi
 
 SERVER_IP=$(curl -s http://checkip.amazonaws.com)
