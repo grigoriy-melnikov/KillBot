@@ -20,6 +20,42 @@ $kb_extra_server_used = false;
 
 $kb_default_server = 'https://data.killbot.ru';
 
+// Hide "KillBot Free" on the spinner when the subscription expired.
+// true = show the label (default). false = do not write it on the page.
+$kb_show_free_label = true;
+
+// Page titles, description and preview image (messengers read HTML meta, browsers
+// then replace the title via JS). Placeholders: {ip} {user_agent} {domain}
+// $kb_page_host is the current site host (HTTP_HOST), already lowercased.
+$kb_page_title = 'KillBot user verification [{ip}] [{user_agent}]...';
+$kb_page_title_js = 'Проверка пользователя...';
+$kb_page_title_js_en = 'User verification...';
+$kb_page_title_js_zh = '用户验证中...';
+$kb_page_description = '';
+// Messenger preview image. Empty = no <meta og:image>. Relative path is turned
+// into https://{domain}/.... For the image to show, add this same path to
+// KillBot allowed paths (otherwise KillBot blocks the image request as a bot).
+$kb_page_image = '';
+
+// Example: own messenger preview for domain.ru / *.domain.ru (no JS, they keep HTML title).
+// Copy the if-block for each extra domain and put your own title/description/image there.
+// Empty description or image = that meta tag is not written.
+if (!empty($kb_page_host) && ($kb_page_host === 'domain.ru' || substr($kb_page_host, -strlen('.domain.ru')) === '.domain.ru')) {
+    $kb_page_title = 'This is the site title for messenger preview on {domain} [{ip}] [{user_agent}]';
+    $kb_page_title_js = 'This is the browser JS title for {domain}';
+    $kb_page_title_js_en = 'This is the browser JS title for {domain}';
+    $kb_page_title_js_zh = 'This is the browser JS title for {domain}';
+    $kb_page_description = 'This is the description for messenger preview on {domain}';
+    $kb_page_image = '/preview.jpg';
+}
+
+// if (!empty($kb_page_host) && ($kb_page_host === 'shop.com' || substr($kb_page_host, -strlen('.shop.com')) === '.shop.com')) {
+//     $kb_page_title = 'This is the site title for messenger preview on {domain} [{ip}] [{user_agent}]';
+//     $kb_page_title_js = 'This is the browser JS title for {domain}';
+//     $kb_page_description = 'This is the description for messenger preview on {domain}';
+//     $kb_page_image = '/preview.jpg';
+// }
+
 // Persist kbUserID, kbRes, kbLoaded, kbT cookies. Set false to skip them.
 $kb_save_result_cookies = true;
 

@@ -192,6 +192,87 @@ kb_install_patched_php() {
     sudo systemctl restart apache2 || true
 }
 
+# Distro nginx on Ubuntu 22.04 is 1.18 (critical CVEs). Official stable is 1.30.x
+# and still accepts listen ... ssl http2. Skip if already 1.26+.
+kb_nginx_version() {
+    nginx -v 2>&1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1 || true
+}
+
+kb_nginx_is_current() {
+    local ver="$1"
+    [[ -n "$ver" ]] || return 1
+    dpkg --compare-versions "$ver" ge "1.26.0"
+}
+
+kb_nginx_ubuntu_codename() {
+    case "${OS_VERSION:-}" in
+        22.04) echo jammy ;;
+        24.04) echo noble ;;
+        25.04) echo plucky ;;
+        25.10) echo questing ;;
+        26.04) echo resolute ;;
+        *) lsb_release -cs 2>/dev/null || echo jammy ;;
+    esac
+}
+
+kb_enable_nginx_official_repo() {
+    local codename keyring listfile pinfile
+    sudo apt-get install -y curl gnupg ca-certificates lsb-release
+    keyring="/usr/share/keyrings/nginx-archive-keyring.gpg"
+    listfile="/etc/apt/sources.list.d/nginx.list"
+    pinfile="/etc/apt/preferences.d/99nginx"
+    curl -fsSL https://nginx.org/keys/nginx_signing.key | sudo gpg --dearmor | sudo tee "$keyring" >/dev/null
+    sudo chmod 644 "$keyring"
+    if ! gpg --dry-run --quiet --no-keyring --import --import-options import-show "$keyring" 2>/dev/null \
+        | grep -q "573BFD6B3D8FBC641079A6ABABF5BD827BD9BF62"; then
+        echo "ERROR: nginx.org signing key fingerprint mismatch." >&2
+        return 1
+    fi
+    codename="$(kb_nginx_ubuntu_codename)"
+    if ! curl -fsSL "https://nginx.org/packages/ubuntu/dists/${codename}/InRelease" >/dev/null 2>&1; then
+        echo "WARNING: nginx.org has no ${codename} packages; using noble."
+        codename="noble"
+    fi
+    echo "deb [signed-by=${keyring}] https://nginx.org/packages/ubuntu ${codename} nginx" | sudo tee "$listfile" >/dev/null
+    printf 'Package: *\nPin: origin nginx.org\nPin: release o=nginx\nPin-Priority: 900\n' | sudo tee "$pinfile" >/dev/null
+    sudo apt-get update -y
+    echo "nginx.org stable repo enabled (${codename})."
+}
+
+kb_nginx_ensure_sites_enabled() {
+    local conf="/etc/nginx/nginx.conf"
+    sudo mkdir -p /etc/nginx/sites-available /etc/nginx/sites-enabled /etc/nginx/conf.d
+    if [ -f "$conf" ] && ! grep -qE 'include[[:space:]]+/etc/nginx/sites-enabled' "$conf"; then
+        if grep -qE 'include[[:space:]]+/etc/nginx/conf\.d/\*\.conf;' "$conf"; then
+            sudo sed -i 's|include[[:space:]]\+/etc/nginx/conf\.d/\*\.conf;|include /etc/nginx/conf.d/*.conf;\n    include /etc/nginx/sites-enabled/*;|' "$conf"
+        else
+            echo "WARNING: $conf has no sites-enabled include — add it inside http { } manually."
+        fi
+    fi
+}
+
+kb_install_current_nginx() {
+    local ver
+    ver="$(kb_nginx_version)"
+    if kb_nginx_is_current "$ver"; then
+        echo "nginx ${ver} is new enough (need 1.26+). Skipping nginx.org repo."
+        kb_nginx_ensure_sites_enabled
+        return 0
+    fi
+
+    echo "nginx ${ver:-not installed} is outdated (Ubuntu 22.04 ships 1.18 with critical CVEs). Installing official stable from nginx.org..."
+    kb_enable_nginx_official_repo
+    sudo DEBIAN_FRONTEND=noninteractive apt-get -y -o Dpkg::Options::="--force-confold" install nginx
+    kb_nginx_ensure_sites_enabled
+    ver="$(kb_nginx_version)"
+    if ! kb_nginx_is_current "$ver"; then
+        echo "ERROR: nginx ${ver:-not installed} is still below 1.26 after the official-repo install." >&2
+        nginx -v >&2 || true
+        exit 1
+    fi
+    echo "nginx ${ver} installed from nginx.org stable."
+}
+
 sudo mkdir -p /etc/needrestart/conf.d
 sudo tee /etc/needrestart/conf.d/zzz-killbot.conf > /dev/null <<'NREOF'
 $nrconf{restart} = 'a';
@@ -309,7 +390,7 @@ sudo systemctl disable postfix || true
 
 sudo apt install ipset -y
 
-sudo apt install -y nginx
+kb_install_current_nginx
 
 sudo apt install openssl -y
 
@@ -2356,6 +2437,11 @@ if [[ -f /opt/killbot/load_nginx_custom_conf.sh ]]; then
     load_nginx_custom_conf "\$domain"
 fi
 
+KB_SOLVER_SNIPPET=""
+if [ -f /etc/nginx/snippets/killbot.conf ]; then
+    KB_SOLVER_SNIPPET="    include /etc/nginx/snippets/killbot.conf;"
+fi
+
 nginXConfigFile="/etc/nginx/sites-available/\$domain.conf"
 
 nginXconfigContent="server {
@@ -2370,6 +2456,7 @@ server {
     server_name \$domain www.\$domain *.\$domain;
 
     include /etc/nginx/conf.d/killbot-too-many-requests.inc;
+\$KB_SOLVER_SNIPPET
 
     ssl_certificate ***SSLCertificateFile***;
     ssl_certificate_key ***SSLCertificateKeyFile***;
@@ -2702,6 +2789,11 @@ backend_ip=\$2
 
 nginXConfigFile="/etc/nginx/sites-available/\$domain.conf"
 
+KB_SOLVER_SNIPPET=""
+if [ -f /etc/nginx/snippets/killbot.conf ]; then
+    KB_SOLVER_SNIPPET="    include /etc/nginx/snippets/killbot.conf;"
+fi
+
 nginXconfigContent="
 server {    
     listen 80;
@@ -2709,6 +2801,7 @@ server {
     server_name \$domain www.\$domain *.\$domain;
 
     include /etc/nginx/conf.d/killbot-too-many-requests.inc;
+\$KB_SOLVER_SNIPPET
 
     if (\\\$server_protocol = "HTTP/1.3") {
         return 403;

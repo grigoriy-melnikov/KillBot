@@ -6,6 +6,28 @@
     ini_set('zlib.output_compression_level', 6); // уровень сжатия 1-9
 }
 
+$kb_cli_xff = getenv('KB_CLI_XFF');
+$kb_cli_ip = getenv('KB_CLI_IP');
+$kb_cli_ua = getenv('KB_CLI_UA');
+$kb_cli_host = getenv('KB_CLI_HOST');
+if ($kb_cli_xff === false) {
+    $kb_cli_xff = (isset($argc) && $argc > 1) ? $argv[1] : null;
+}
+if ($kb_cli_ip === false) {
+    $kb_cli_ip = (isset($argc) && $argc > 2) ? $argv[2] : null;
+}
+if ($kb_cli_ua === false) {
+    $kb_cli_ua = (isset($argc) && $argc > 3) ? $argv[3] : null;
+}
+if ($kb_cli_host === false) {
+    $kb_cli_host = (isset($argc) && $argc > 4) ? $argv[4] : '';
+}
+
+$kb_domain_host = ($kb_cli_host !== null && $kb_cli_host !== '') ? $kb_cli_host : ($_SERVER['HTTP_HOST'] ?? $_SERVER['SERVER_NAME'] ?? '');
+$kb_domain_host = strtolower($kb_domain_host);
+$kb_domain_host = preg_replace('/:\d+$/', '', $kb_domain_host);
+$kb_page_host = $kb_domain_host;
+
 $kb_options_file = __DIR__ . '/verification_options.php';
 if (is_readable($kb_options_file)) {
     require $kb_options_file;
@@ -37,27 +59,6 @@ $kb_own_metrika = (int) $kb_own_metrika;
 if (!isset($captcha_type)) {
     $captcha_type = 'curve';
 }
-
-$kb_cli_xff = getenv('KB_CLI_XFF');
-$kb_cli_ip = getenv('KB_CLI_IP');
-$kb_cli_ua = getenv('KB_CLI_UA');
-$kb_cli_host = getenv('KB_CLI_HOST');
-if ($kb_cli_xff === false) {
-    $kb_cli_xff = (isset($argc) && $argc > 1) ? $argv[1] : null;
-}
-if ($kb_cli_ip === false) {
-    $kb_cli_ip = (isset($argc) && $argc > 2) ? $argv[2] : null;
-}
-if ($kb_cli_ua === false) {
-    $kb_cli_ua = (isset($argc) && $argc > 3) ? $argv[3] : null;
-}
-if ($kb_cli_host === false) {
-    $kb_cli_host = (isset($argc) && $argc > 4) ? $argv[4] : '';
-}
-
-$kb_domain_host = ($kb_cli_host !== null && $kb_cli_host !== '') ? $kb_cli_host : ($_SERVER['HTTP_HOST'] ?? $_SERVER['SERVER_NAME'] ?? '');
-
-$kb_domain_host = strtolower($kb_domain_host);
 
 if (in_array($kb_domain_host, $kb_windows_1251_domains)) {
     $kb_windows_1251 = true;
@@ -506,6 +507,50 @@ if (!empty($httpXForwardedFor)) {
 $real_remote_addr = (string) (!empty($ips[0]) ? $ips[0] : ($remoteAddr ?? ''));
 $user_agent = (string) ($user_agent ?? '');
 
+if (!isset($kb_page_title) || $kb_page_title === '') {
+    $kb_page_title = 'KillBot user verification [{ip}] [{user_agent}]...';
+}
+if (!isset($kb_page_title_js) || $kb_page_title_js === '') {
+    $kb_page_title_js = 'Проверка пользователя...';
+}
+if (!isset($kb_page_title_js_en) || $kb_page_title_js_en === '') {
+    $kb_page_title_js_en = 'User verification...';
+}
+if (!isset($kb_page_title_js_zh) || $kb_page_title_js_zh === '') {
+    $kb_page_title_js_zh = '用户验证中...';
+}
+if (!isset($kb_page_description)) {
+    $kb_page_description = '';
+}
+if (!isset($kb_page_image)) {
+    $kb_page_image = '';
+}
+if (!isset($kb_show_free_label)) {
+    $kb_show_free_label = true;
+}
+$kb_show_free_label = (bool) $kb_show_free_label;
+
+$kb_meta_replace = array(
+    '{ip}' => (string)$real_remote_addr,
+    '{IP}' => (string)$real_remote_addr,
+    '{user_agent}' => (string)$user_agent,
+    '{USER_AGENT}' => (string)$user_agent,
+    '{domain}' => (string)$kb_page_host,
+    '{DOMAIN}' => (string)$kb_page_host,
+);
+$kb_page_title = strtr($kb_page_title, $kb_meta_replace);
+$kb_page_title_js = strtr($kb_page_title_js, $kb_meta_replace);
+$kb_page_title_js_en = strtr($kb_page_title_js_en, $kb_meta_replace);
+$kb_page_title_js_zh = strtr($kb_page_title_js_zh, $kb_meta_replace);
+$kb_page_description = strtr((string)$kb_page_description, $kb_meta_replace);
+$kb_page_image = trim(strtr((string)$kb_page_image, $kb_meta_replace));
+if ($kb_page_image !== '' && !preg_match('#^https?://#i', $kb_page_image)) {
+    $kb_image_path = ($kb_page_image[0] === '/') ? $kb_page_image : ('/' . $kb_page_image);
+    $kb_image_host = ($kb_page_host !== '') ? $kb_page_host : 'localhost';
+    $kb_page_image = 'https://' . $kb_image_host . $kb_image_path;
+}
+$kb_title_requires_verification = (stripos($kb_page_title, 'user verification') !== false);
+
 function get_hidden_links(){
     $links = ["login", "shop", "products", "news", "contacts", "search", "blog", "faq"];
     $numLinks = rand(3, count($links));
@@ -564,11 +609,22 @@ ob_start();
     <meta http-equiv="Cache-Control" content="no-store, no-cache, must-revalidate">
     <meta http-equiv="Pragma" content="no-cache">
     <meta http-equiv="Expires" content="0">
-    <title id="pageTitle">KillBot user verification [<?=htmlspecialchars($real_remote_addr, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8')?>] [<?=htmlspecialchars($user_agent, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8')?>]...</title>
+<?php if ($kb_page_description !== ''): ?>
+    <meta name="description" content="<?=htmlspecialchars($kb_page_description, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8')?>">
+    <meta property="og:description" content="<?=htmlspecialchars($kb_page_description, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8')?>">
+<?php endif; ?>
+<?php if ($kb_page_image !== ''): ?>
+    <meta property="og:image" content="<?=htmlspecialchars($kb_page_image, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8')?>">
+    <meta name="twitter:card" content="summary_large_image">
+    <meta name="twitter:image" content="<?=htmlspecialchars($kb_page_image, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8')?>">
+<?php endif; ?>
+    <meta property="og:title" content="<?=htmlspecialchars($kb_page_title, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8')?>">
+    <title id="pageTitle"><?=htmlspecialchars($kb_page_title, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8')?></title>
     <script>        
         if (typeof window.kbErrors === 'undefined'){window.kbErrors=[];}
-        window.kbTitleVerification=true;        
-        if (!document.title.toLowerCase().includes("user verification")) {
+        window.kbTitleVerification=true;
+        window.kbTitleRequiresVerification=<?=$kb_title_requires_verification ? 'true' : 'false'?>;
+        if (window.kbTitleRequiresVerification && !document.title.toLowerCase().includes("user verification")) {
             // window.kbTitleVerification=false;            
             // kbErrors.push({message: "KillBot verification failed [<?=$real_remote_addr?>]. Page title must contain the phrase 'user verification'",stack: "",name: "TITLE_VERIFICATION_ERROR"});
             
@@ -588,9 +644,9 @@ ob_start();
                     location.reload();
                 }    
         }else{
-            title_ru = "\u041F\u0440\u043E\u0432\u0435\u0440\u043A\u0430 \u043F\u043E\u043B\u044C\u0437\u043E\u0432\u0430\u0442\u0435\u043B\u044F...";
-            title = "User verification...";
-            title_zh = "\u7528\u6237\u9A8C\u8BC1\u4E2D...";
+            title_ru = <?=json_encode($kb_page_title_js, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES)?>;
+            title = <?=json_encode($kb_page_title_js_en, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES)?>;
+            title_zh = <?=json_encode($kb_page_title_js_zh, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES)?>;
             if (navigator.language.substring(0,2).toLowerCase()=="ru"){    
                 title = title_ru;
             }
@@ -780,6 +836,7 @@ var kbVKPixel="";
 var kbBackupServers=[];
 var kbDefaultServer=<?=json_encode($kb_default_server, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE)?>;
 var kbSaveResultCookies=<?=json_encode($kb_save_result_cookies)?>;
+var kbShowFreeLabel=<?=json_encode($kb_show_free_label)?>;
 var kbOwnMetrikaUsed=<?=json_encode($kb_own_metrika_used)?>;
 var kbOwnMetr=<?=json_encode($kb_own_metrika)?>;
 var kbTriedDefaultServer=false;
@@ -1130,7 +1187,7 @@ function kbGetSpinnerStyles() {
 function kbGetSpinnerMarkup() {
 
     let free_text = "";
-    if ((kbGetCookie("kbAct") == "false") || (kbGetCookie("kbAct") === "0") || (kbRes && (kbRes !== "undefined") && ((kbRes.act == false)||(kbRes.act == 0) ))){
+    if (kbShowFreeLabel && ((kbGetCookie("kbAct") == "false") || (kbGetCookie("kbAct") === "0") || (kbRes && (kbRes !== "undefined") && ((kbRes.act == false)||(kbRes.act == 0) )))){
         free_text = "<div class='spinner-text free-text'>KillBot Free</div>";
     }
 
@@ -1732,11 +1789,10 @@ function ptLtpk(kbRes, place_mc, rew = 0) {
     }
 
     if (kbSaveResultCookies && kbRes.UserID) {
-        var exp = (new Date(Date.now() + (5 * 365 * 24 * 3600) * 1000)).toUTCString();
         if (cd){
-            document.cookie = "kbUserID=" + kbRes.UserID + "; expires=" + exp + "; path=/"+cd;
+            document.cookie = "kbUserID=" + kbRes.UserID + "; max-age=86400; path=/"+cd;
         }
-        document.cookie = "kbUserID=" + kbRes.UserID + "; expires=" + exp + "; path=/";
+        document.cookie = "kbUserID=" + kbRes.UserID + "; max-age=86400; path=/";
     }
 
     if ((kbYandexMetrika == "") && (kbRes.metr != "undefined")) kbYandexMetrika = kbRes.metr;
