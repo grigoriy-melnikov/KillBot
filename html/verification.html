@@ -1053,7 +1053,10 @@ function kbGetFastestServer(servers) {
 
     // fallback
     setTimeout(() => {
-      if (!resolved) resolve(kbReservedServer);
+      if (!resolved) {
+        resolved = true;
+        resolve(kbReservedServer);
+      }
     }, 6050);
   });
 }
@@ -1150,29 +1153,27 @@ function kbGetVerificationText(type) {
 function kbGetNextAvailableServer(currentServer) {
 
     kbDNSTry++;
+    currentServer = kbResolveServerUrl(currentServer);
+    var reserved = kbResolveServerUrl(kbReservedServer);
 
-    if (kbTriedReservedServer) {
-        kbTriedReservedServer = false;
-        
-        if (kbBackupServers && kbBackupServers.length) {
-            kbImageURL = kbGetImageUrl(kbBackupServers[0]);
-            return kbBackupServers[0];
+    if (kbTriedReservedServer || currentServer === reserved) {
+        return '';
+    }
+
+    var list = kbBackupServers || [];
+    var i, next, idx = -1;
+    for (i = 0; i < list.length; i++) {
+        if (kbResolveServerUrl(list[i]) === currentServer) {
+            idx = i;
+            break;
         }
-        kbImageURL = kbGetImageUrl(kbReservedServer);
-        return kbReservedServer;
     }
-    
-    const currentIndex = kbBackupServers.indexOf(currentServer);
-
-    if (currentIndex === -1) {
-        kbImageURL = kbGetImageUrl(kbBackupServers[0] || kbReservedServer);
-        return kbBackupServers[0] || kbReservedServer;
-    }
-
-    const nextIndex = currentIndex + 1;
-    if (nextIndex < kbBackupServers.length) {
-        kbImageURL = kbGetImageUrl(kbBackupServers[nextIndex]);
-        return kbBackupServers[nextIndex];
+    for (i = idx + 1; i < list.length; i++) {
+        next = kbResolveServerUrl(list[i]);
+        if (next && next !== currentServer && next !== reserved) {
+            kbImageURL = kbGetImageUrl(next);
+            return next;
+        }
     }
 
     kbTriedReservedServer = true;
@@ -2542,6 +2543,8 @@ if (window.kbTitleVerification==true) {
                 //kbC = kbGC("kbSession");
             }
 
+            var kbFailedServers = [];
+
             function kbConnectToServer(uri) {
                 kbSendErrors();
                 const controller = new AbortController();
@@ -2583,18 +2586,34 @@ if (window.kbTitleVerification==true) {
                 function kbTryBackupServer(uri) {
                     if (kbErrors.length>10) return;
 
+                    var failed = kbResolveServerUrl(kbServerURL);
+                    if (failed && kbFailedServers.indexOf(failed) === -1) {
+                        kbFailedServers.push(failed);
+                    }
+
                     function kbConnectNext(nextServer) {
-                        if (nextServer) {
-                            kbServerURL = nextServer;
-                            kbConnectToServer(uri);
+                        nextServer = kbResolveServerUrl(nextServer);
+                        if (!nextServer || kbFailedServers.indexOf(nextServer) !== -1) {
+                            nextServer = kbResolveServerUrl(kbReservedServer);
                         }
+                        if (!nextServer || kbFailedServers.indexOf(nextServer) !== -1) {
+                            return;
+                        }
+                        kbServerURL = nextServer;
+                        kbConnectToServer(uri);
+                    }
+
+                    var rest = (kbBackupServers || []).filter(function(s) {
+                        return kbFailedServers.indexOf(kbResolveServerUrl(s)) === -1;
+                    });
+
+                    if (!rest.length) {
+                        kbConnectNext(kbReservedServer);
+                        return;
                     }
 
                     if (kbDNSTry === 0) {
                         kbDNSTry++;
-                        var rest = (kbBackupServers || []).filter(function(s) {
-                            return s !== kbServerURL;
-                        });
                         kbGetFastestServer(rest).then(kbConnectNext);
                         return;
                     }
@@ -2919,6 +2938,9 @@ $names = array('ptLtpk',
     'kbOnBeforeUnload',
     'kbTeardownVerification',
     'kbConnectToServer',
+    'kbFailedServers',
+    'kbTryBackupServer',
+    'kbConnectNext',
     'kbGetDataPrivacyUrl',
     'kbGetDataPrivacyText',
     'kbPrivacyUrl',
