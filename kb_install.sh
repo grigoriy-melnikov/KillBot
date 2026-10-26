@@ -1675,9 +1675,14 @@ EOF
 
 sudo chmod +x /opt/killbot/kbEqual.php
 
-sudo sudo tee /opt/killbot/kb.lua > /dev/null <<EOF
+# Only the Lua package paths need shell expansion. Quote the rest so
+# comments like $(...) are not executed as command substitution.
+sudo sudo tee /opt/killbot/kb.lua > /dev/null <<KB_LUA_HEAD
 package.path = "${KB_LUA_PATH}" .. package.path
 package.cpath = "${KB_LUA_CPATH}" .. package.cpath
+KB_LUA_HEAD
+
+sudo sudo tee -a /opt/killbot/kb.lua > /dev/null <<'KB_LUA_BODY'
 
 local md5 = require "md5"
 
@@ -1698,7 +1703,7 @@ function log_message(message,domain)
     end
 end
 
--- POSIX shell quoting. Lua %q is not shell-safe ($(...) still runs inside double quotes).
+-- POSIX shell quoting. Lua %q is not shell-safe (command substitution still runs inside double quotes).
 local function sh_quote(s)
     s = tostring(s or "")
     return "'" .. string.gsub(s, "'", "'\\\\''") .. "'"
@@ -2258,7 +2263,7 @@ end
     end
 end
 
-EOF
+KB_LUA_BODY
 
 
 sudo tee /opt/killbot/nginx_custom.conf > /dev/null <<'EOF'
@@ -4611,19 +4616,22 @@ SUDOERS_DROP=(
     "www-data ALL=(ALL) NOPASSWD: /opt/killbot/check_host_curl.sh"
     "www-data ALL=(ALL) NOPASSWD: /opt/killbot/read_apache_log.sh"
 )
-SUDOERS_TMP="$(mktemp)"
+# visudo rejects files in world-writable dirs (/tmp). Keep the check copy in /root.
+SUDOERS_TMP="/root/.killbot-sudoers.check"
 grep -Fxv -f <(printf '%s\n' "${SUDOERS_DROP[@]}") /etc/sudoers > "$SUDOERS_TMP" || true
-if visudo -c -f "$SUDOERS_TMP" >/dev/null 2>&1; then
-    cat "$SUDOERS_TMP" > /etc/sudoers
-    chmod 440 /etc/sudoers
-else
+if ! visudo -c -f "$SUDOERS_TMP"; then
     echo "ERROR: sudoers cleanup failed validation; /etc/sudoers left unchanged" >&2
     rm -f "$SUDOERS_TMP"
     exit 1
 fi
+cat "$SUDOERS_TMP" > /etc/sudoers
+chmod 440 /etc/sudoers
 rm -f "$SUDOERS_TMP"
 
-cat > /etc/sudoers.d/killbot <<'EOF'
+# Quoted heredoc + strip CR so Windows line endings cannot break visudo.
+# Validate the fragment in /root first (visudo skips names with '.' in sudoers.d).
+SUDOERS_DROPIN="/root/.killbot-sudoers.d.check"
+cat > "$SUDOERS_DROPIN" <<'EOF'
 www-data ALL=(ALL) NOPASSWD: /opt/killbot/install.sh
 www-data ALL=(ALL) NOPASSWD: /opt/killbot/check_host_curl.sh
 www-data ALL=(ALL) NOPASSWD: /opt/killbot/read_apache_log.sh
@@ -4634,9 +4642,22 @@ www-data ALL=(ALL) NOPASSWD: /etc/init.d/kb a2dissite *
 www-data ALL=(ALL) NOPASSWD: /etc/init.d/kb cert_del *
 www-data ALL=(ALL) NOPASSWD: /etc/init.d/kb remove *
 EOF
+tr -d '\r' < "$SUDOERS_DROPIN" > "${SUDOERS_DROPIN}.lf"
+mv "${SUDOERS_DROPIN}.lf" "$SUDOERS_DROPIN"
+if ! visudo -c -f "$SUDOERS_DROPIN"; then
+    echo "ERROR: /etc/sudoers.d/killbot failed visudo syntax check" >&2
+    rm -f "$SUDOERS_DROPIN"
+    exit 1
+fi
+cp "$SUDOERS_DROPIN" /etc/sudoers.d/killbot
+rm -f "$SUDOERS_DROPIN"
+chown root:root /etc/sudoers.d/killbot
 chmod 440 /etc/sudoers.d/killbot
-if ! visudo -c >/dev/null 2>&1; then
+if ! visudo -c; then
     echo "ERROR: sudoers validation failed after writing /etc/sudoers.d/killbot" >&2
+    echo "Other files in /etc/sudoers.d:" >&2
+    ls -la /etc/sudoers.d >&2 || true
+    rm -f /etc/sudoers.d/killbot
     exit 1
 fi
 
