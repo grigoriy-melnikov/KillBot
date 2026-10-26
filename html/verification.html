@@ -2572,7 +2572,8 @@ if (window.kbTitleVerification==true) {
                 scr = document.head.getElementsByTagName('script').length + ((window.kbSpinner == null)?1:0);
                 lv=h.length+((scr==3)?0:1);
             }
-            kbConnectToServer("/js/cn.js?hash_str=" + kbKey + "&p=" + btoa(kbIP) +
+            var kbHashStr = (typeof kbKey === 'string') ? kbKey : (kbDNS ? 'dns' : '');
+            kbConnectToServer("/js/cn.js?hash_str=" + kbHashStr + "&p=" + btoa(kbIP) +
                     "&r=" + btoa(document.referrer) + "&url=" + btoa(location.href) +
                     "&c=" + kbC + "&kbUserID=" + kbUserID + "&lv=" + lv + "&v=0" + "&rmd" + Math.random());
         } catch (error) {        
@@ -2873,6 +2874,7 @@ $names = array('ptLtpk',
     'kbOnBeforeUnload',
     'kbTeardownVerification',
     'kbConnectToServer',
+    'kbHashStr',
     'kbDeleteCookie',
     'kbIsFileUrl',
     'kbGetDecoyAnchors',
@@ -2884,28 +2886,36 @@ $names = array('ptLtpk',
     'kbResumeAfterVerification',
     'kbRreplaceContent');
     
+preg_match_all('/\bkb[A-Za-z0-9]+\b/', $html, $kb_ident_m);
+$kb_reserved = array_fill_keys($kb_ident_m[0], true);
+foreach ($names as $name) {
+    $kb_reserved[$name] = true;
+}
+
 $replaces = array();
-
-foreach ($names AS $item){
-$replaces []= "kb".generateRandomString(rand(3,5));
+foreach ($names as $item) {
+    $rep = '';
+    for ($t = 0; $t < 80; $t++) {
+        $candidate = 'kb' . generateRandomString(rand(3, 5));
+        if (isset($kb_reserved[$candidate])) {
+            continue;
+        }
+        $rep = $candidate;
+        $kb_reserved[$candidate] = true;
+        break;
+    }
+    if ($rep === '') {
+        $rep = 'kb' . generateRandomString(8);
+        $kb_reserved[$rep] = true;
+    }
+    $replaces[] = $rep;
 }
 
-$replace_counts = array_count_values($replaces);
-$names_keep = array();
-$replaces_keep = array();
-foreach ($names as $i => $name) {
-    $rep = $replaces[$i];
-    if ($replace_counts[$rep] !== 1) {
-        continue;
-    }
-    if (in_array($rep, $names, true)) {
-        continue;
-    }
-    $names_keep[] = $name;
-    $replaces_keep[] = $rep;
-}
+$names_by_len = $names;
+$replaces_by_len = $replaces;
+array_multisort(array_map('strlen', $names_by_len), SORT_DESC, $names_by_len, $replaces_by_len);
 
-$html = str_replace($names_keep, $replaces_keep, $html);
+$html = str_replace($names_by_len, $replaces_by_len, $html);
 
 ob_end_clean();
 $size=0;
