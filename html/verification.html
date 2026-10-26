@@ -2584,8 +2584,6 @@ if (window.kbTitleVerification==true) {
                     });
 
                 function kbTryBackupServer(uri) {
-                    if (kbErrors.length>10) return;
-
                     var failed = kbResolveServerUrl(kbServerURL);
                     if (failed && kbFailedServers.indexOf(failed) === -1) {
                         kbFailedServers.push(failed);
@@ -2603,12 +2601,18 @@ if (window.kbTitleVerification==true) {
                         kbConnectToServer(uri);
                     }
 
+                    var reserved = kbResolveServerUrl(kbReservedServer);
                     var rest = (kbBackupServers || []).filter(function(s) {
                         return kbFailedServers.indexOf(kbResolveServerUrl(s)) === -1;
                     });
 
                     if (!rest.length) {
-                        kbConnectNext(kbReservedServer);
+                        kbConnectNext(reserved);
+                        return;
+                    }
+
+                    if (kbFailedServers.length > 10) {
+                        kbConnectNext(reserved);
                         return;
                     }
 
