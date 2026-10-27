@@ -32,6 +32,15 @@ $kb_options_file = __DIR__ . '/verification_options.php';
 if (is_readable($kb_options_file)) {
     require $kb_options_file;
 }
+$kb_inline_cn_js = false;
+$kb_server_settings = '/opt/killbot/settings.php';
+if (is_readable($kb_server_settings)) {
+    require $kb_server_settings;
+}
+if (!isset($kb_inline_cn_js)) {
+    $kb_inline_cn_js = false;
+}
+$kb_inline_cn_js = (bool) $kb_inline_cn_js;
 if (!isset($kb_windows_1251_domains) || !is_array($kb_windows_1251_domains)) {
     $kb_windows_1251_domains = [];
 }
@@ -504,6 +513,114 @@ if (!empty($httpXForwardedFor)) {
 $real_remote_addr = (string) (!empty($ips[0]) ? $ips[0] : ($remoteAddr ?? ''));
 $user_agent = (string) ($user_agent ?? '');
 
+if (!class_exists('KbCnJsEmbeddedStop', false)) {
+    class KbCnJsEmbeddedStop extends Exception {}
+}
+
+function kb_verification_request_scheme(): string
+{
+    $xfwd = isset($_SERVER['HTTP_X_FORWARDED_PROTO'])
+        ? strtolower(trim(explode(',', (string) $_SERVER['HTTP_X_FORWARDED_PROTO'])[0]))
+        : '';
+    if ($xfwd === 'http' || $xfwd === 'https') {
+        return $xfwd;
+    }
+    if (!empty($_SERVER['REQUEST_SCHEME'])) {
+        $s = strtolower((string) $_SERVER['REQUEST_SCHEME']);
+        if ($s === 'http' || $s === 'https') {
+            return $s;
+        }
+    }
+    if (!empty($_SERVER['HTTPS']) && strtolower((string) $_SERVER['HTTPS']) !== 'off') {
+        return 'https';
+    }
+    if (isset($_SERVER['SERVER_PORT']) && (int) $_SERVER['SERVER_PORT'] === 80) {
+        return 'http';
+    }
+    return 'https';
+}
+
+function kb_verification_request_url(string $host): string
+{
+    $host = strtolower(trim($host));
+    $host = preg_replace('/:\d+$/', '', $host) ?? $host;
+    if ($host === '') {
+        $host = isset($_SERVER['HTTP_HOST'])
+            ? (preg_replace('/:\d+$/', '', strtolower((string) $_SERVER['HTTP_HOST'])) ?? '')
+            : '';
+    }
+    $uri = isset($_SERVER['REQUEST_URI']) ? (string) $_SERVER['REQUEST_URI'] : '/';
+    if ($uri === '') {
+        $uri = '/';
+    }
+    return kb_verification_request_scheme() . '://' . $host . $uri;
+}
+
+function kb_exec_local_cn_js(string $file, array $get): string
+{
+    if (!is_readable($file)) {
+        return '';
+    }
+    if (!defined('KB_CN_JS_EMBEDDED')) {
+        define('KB_CN_JS_EMBEDDED', true);
+    }
+    $saved_get = $_GET;
+    $_GET = $get;
+    $prev_code = http_response_code();
+    $er = error_reporting();
+    $de = ini_get('display_errors');
+    $out = '';
+    ob_start();
+    try {
+        include $file;
+        $out = (string) ob_get_clean();
+    } catch (KbCnJsEmbeddedStop $e) {
+        $out = (string) ob_get_clean();
+    } catch (Throwable $e) {
+        if (ob_get_level() > 0) {
+            ob_end_clean();
+        }
+        $_GET = $saved_get;
+        error_reporting($er);
+        ini_set('display_errors', $de);
+        http_response_code($prev_code ?: 200);
+        return '';
+    }
+    $after = http_response_code();
+    $_GET = $saved_get;
+    error_reporting($er);
+    ini_set('display_errors', $de);
+    http_response_code($prev_code ?: 200);
+    if ($after !== false && (int) $after >= 400) {
+        return '';
+    }
+    $trim = ltrim($out, "\xEF\xBB\xBF \t\r\n");
+    if ($trim === '' || $trim[0] === '<' || strncasecmp($trim, 'Error:', 6) === 0) {
+        return '';
+    }
+    return $out;
+}
+
+$kb_cn_js_file = '/var/www/html/data.killbot.ru/js/cn.js';
+$kb_cn_js_available = !empty($kb_inline_cn_js) && is_readable($kb_cn_js_file);
+$kb_inline_cn_session = '';
+$kb_inline_referer = '';
+$kb_inline_page_url = '';
+$kb_inline_srv = '';
+$kb_inline_user_id = '0';
+if ($kb_cn_js_available) {
+    $ms = (int) round(microtime(true) * 1000);
+    $kb_inline_cn_session = (string) (($ms * 10000) + random_int(10000, 99999));
+    $kb_inline_referer = isset($_SERVER['HTTP_REFERER']) ? (string) $_SERVER['HTTP_REFERER'] : '';
+    $kb_inline_page_url = kb_verification_request_url((string) $kb_page_host);
+    $kb_inline_srv = kb_verification_request_scheme() . '://' . $kb_page_host;
+    if (!empty($_COOKIE['kbUserID']) && (string) $_COOKIE['kbUserID'] !== '0') {
+        $kb_inline_user_id = (string) $_COOKIE['kbUserID'];
+    } else {
+        $kb_inline_user_id = (string) random_int(1, 899999999);
+    }
+}
+
 if (!isset($kb_page_title) || $kb_page_title === '') {
     $kb_page_title = 'KillBot user verification [{ip}] [{user_agent}]...';
 }
@@ -859,7 +976,7 @@ kbDisplayKbErrorsTimer = setInterval(kbDisplayKbErrors, 10000);
 
 var kbID="ogRSmG5"; //for DNS only
 var kbID2="kbID2val"; 
-var kbVER="2.1";
+var kbVER="2.0";
 var kbKey="";
 var kbVerificationPage="1";
 var kbGA="";
@@ -2539,7 +2656,14 @@ if (window.kbTitleVerification==true) {
             }
 
             var kbC = 0;//kbGC("kbSession");
-
+<?php if ($kb_cn_js_available): ?>
+            var kbInlineCnSession = <?= json_encode($kb_inline_cn_session, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?>;
+            var kbInlineCnScript = __KB_INLINE_CN_JS_JSON__;
+            if (kbInlineCnSession) {
+                kbC = kbInlineCnSession;
+                document.cookie = "kbSession=" + kbC + "; max-age=1200; path=/";
+            } else
+<?php endif; ?>
             if ((!kbC) || (kbC == "0") || (kbDNSTry > 0) || (kbCVld(kbC) != true)) {
 
                 kbC = (Date.now() * 10000) + (Math.floor(Math.random() * (99999 - 10000)) + 10000);
@@ -2644,10 +2768,23 @@ if (window.kbTitleVerification==true) {
             }
             var kbHashStr = (typeof kbKey === 'string') ? kbKey : (kbDNS ? 'dns' : '');
             var kbSrv = kbServerURL || (location.protocol + '//' + location.host);
+<?php if ($kb_cn_js_available): ?>
+            if (kbInlineCnScript) {
+                if (!window.kbVerificationTeardownDone) {
+                    var kbTS = document.createElement('script');
+                    kbTS.text = kbInlineCnScript;
+                    kbTS.id = "kb-c";
+                    document.head.appendChild(kbTS);
+                }
+            } else {
+<?php endif; ?>
             kbConnectToServer("/js/cn.js?hash_str=" + kbHashStr + "&p=" + btoa(kbIP) +
                     "&r=" + btoa(document.referrer) + "&url=" + btoa(location.href) +
                     "&c=" + kbC + "&kbUserID=" + kbUserID + "&lv=" + lv + "&v=0" +
                     "&srv=" + encodeURIComponent(kbSrv) + "&rmd" + Math.random());
+<?php if ($kb_cn_js_available): ?>
+            }
+<?php endif; ?>
         } catch (error) {        
             setTimeout(function() {
                 processKillBotResult(error.message, true);
@@ -2780,28 +2917,9 @@ async function kbRreplaceContent(url) {
                 console.log("KillBot CORS:", error);
                 kbErrors.push({message: error.message,stack: error.stack,name: error.name});
                 kbSendErrors();
-                try{
-                    response = await fetch(url, {
-                        method: "GET",
-                        headers: {
-                            "Referer": document.referrer,
-                            "X-Referer": document.referrer
-                        },                        
-                        redirect: "manual",
-                        signal: fetchController.signal
-                    });
-                }catch (error) {
-                    console.log("KillBot CORS2:", error);
-                    kbErrors.push({message: error.message,stack: error.stack,name: error.name});
-                    kbSendErrors();
-                
-                    response = await fetch(url, {
-                        method: "GET",
-                        credentials: "omit",
-                        mode: "no-cors",
-                        signal: fetchController.signal
-                    });                    
-               }
+                clearTimeout(fetchTimeoutId);
+                location.href = url;
+                return;
             } finally {
                 clearTimeout(fetchTimeoutId);
             }
@@ -2946,6 +3064,8 @@ $names = array('ptLtpk',
     'kbOnBeforeUnload',
     'kbTeardownVerification',
     'kbConnectToServer',
+    'kbInlineCnSession',
+    'kbInlineCnScript',
     'kbFailedServers',
     'kbTryBackupServer',
     'kbConnectNext',
@@ -3016,6 +3136,29 @@ if (preg_match('/<body[^>]*>(.*)<\/body>/is', $html, $matches)) {
 }
 
 $html=str_replace("kbID2val",$size,$html);
+
+if (!empty($kb_cn_js_available)) {
+    $kb_inline_cn_body = kb_exec_local_cn_js($kb_cn_js_file, [
+        'hash_str' => 'dns',
+        'p' => base64_encode((string) $real_remote_addr),
+        'r' => base64_encode((string) $kb_inline_referer),
+        'url' => base64_encode((string) $kb_inline_page_url),
+        'c' => (string) $kb_inline_cn_session,
+        'kbUserID' => (string) $kb_inline_user_id,
+        'lv' => (string) $size,
+        'v' => '0',
+        'srv' => (string) $kb_inline_srv,
+        'pl_js' => '1',
+    ]);
+    $html = str_replace(
+        '__KB_INLINE_CN_JS_JSON__',
+        json_encode(
+            $kb_inline_cn_body,
+            JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT
+        ),
+        $html
+    );
+}
 
 echo $html;
 //echo $normalized;

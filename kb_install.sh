@@ -48,6 +48,20 @@ sudo() {
     command sudo DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a NEEDRESTART_SUSPEND=1 "$@"
 }
 
+# sysctl -p/--system exits non-zero if a key has no /proc node (typical when
+# IPv6 is already off via ipv6.disable=1). Do not abort the installer.
+kb_sysctl_p() {
+    if ! sudo sysctl -p; then
+        echo "Warning: some sysctl keys could not be applied (missing in this kernel). Continuing."
+    fi
+}
+
+kb_sysctl_system() {
+    if ! sysctl --system; then
+        echo "Warning: some sysctl keys could not be applied (missing in this kernel). Continuing."
+    fi
+}
+
 # PHP2Shell (CVE-2026-109618, CVE-2026-109619): unauthenticated RCE in the
 # interpreter. Fixed in 8.2.35 / 8.3.36 / 8.4.27 / 8.5.12. PHP 8.1 is EOL
 # and is not patched. Ubuntu 22.04 ships 8.1, so KillBot installs a patched
@@ -1177,8 +1191,8 @@ EOF
 # return 421 (SNI/Host mismatch). 000-default.conf already has :8443.
 sudo a2dissite 000-default-ssl >/dev/null 2>&1 || true
 
-sysctl --system
-sysctl net.ipv4.tcp_syncookies net.core.somaxconn net.ipv4.tcp_max_syn_backlog net.ipv4.tcp_synack_retries
+kb_sysctl_system
+sysctl net.ipv4.tcp_syncookies net.core.somaxconn net.ipv4.tcp_max_syn_backlog net.ipv4.tcp_synack_retries || true
 
 sudo a2enmod security2
 sudo a2enmod reqtimeout
@@ -1372,10 +1386,23 @@ $kb_le_letsencrypt_dir = '/etc/letsencrypt';
 // After a successful centralized receive, delete the local certbot certificate for that domain.
 // Ignored when $kb_accept_centralized_certs is false.
 $kb_le_remove_local_letsencrypt = true;
+
+// Inline /js/cn.js into verification.html when the file exists on this server.
+// false = browser fetches cn.js over HTTP as before.
+$kb_inline_cn_js = false;
 EOF
     echo "Created /opt/killbot/settings.php"
 else
     echo "Keep existing settings: /opt/killbot/settings.php"
+fi
+if [ -f /opt/killbot/settings.php ] && ! grep -q 'kb_inline_cn_js' /opt/killbot/settings.php; then
+sudo tee -a /opt/killbot/settings.php > /dev/null <<'EOF'
+
+// Inline /js/cn.js into verification.html when the file exists on this server.
+// false = browser fetches cn.js over HTTP as before.
+$kb_inline_cn_js = false;
+EOF
+    echo "Added kb_inline_cn_js to /opt/killbot/settings.php"
 fi
 sudo chown root:root /opt/killbot/settings.php
 sudo chmod 644 /opt/killbot/settings.php
@@ -4783,6 +4810,9 @@ CONFIG_LINES=(
 "net.ipv6.conf.lo.disable_ipv6 = 1"
 )
 
+if [ ! -d /proc/sys/net/ipv6 ]; then
+    echo "IPv6 sysctl tree is absent on this kernel; skip disable_ipv6 keys."
+else
 echo "Checking and adding IPv6 disable settings to $SYSCTL_CONF..."
 
 for line in "${CONFIG_LINES[@]}"; do
@@ -4795,10 +4825,11 @@ for line in "${CONFIG_LINES[@]}"; do
         echo "Added: $line"
     fi
 done
+fi
 
-# Apply changes immediately
+# Apply changes immediately. Missing keys (no IPv6 /proc) must not stop install.
 echo "Applying sysctl settings..."
-sudo sysctl -p
+kb_sysctl_p
 
 echo "IPv6 disable settings are applied and persisted."
 
@@ -4895,7 +4926,7 @@ echo "Configuring system-wide file descriptors..."
 # Remove existing entry if present and append new value
 sed -i "/fs.file-max/d" /etc/sysctl.conf
 echo "fs.file-max = $MAX_OPEN_FILES_SYS" >> /etc/sysctl.conf
-sysctl -p
+kb_sysctl_p
 
 # 2. Configure user limits in limits.conf
 echo "Configuring user limits..."
@@ -5546,7 +5577,7 @@ net.core.somaxconn = 8192 # 65535
 net.ipv4.tcp_max_tw_buckets = 2000000
 EOF
 
-sysctl --system
+kb_sysctl_system
 
 /opt/killbot/update-symmetric-ip.sh
 
