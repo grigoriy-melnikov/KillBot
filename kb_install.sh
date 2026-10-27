@@ -1218,22 +1218,19 @@ sudo a2enmod "$PHP_MOD"
 echo "Enabled Apache module: $PHP_MOD (mpm_prefork)"
 #####################
 
-# lua5.1 is in universe on 22.04–26.04. Apache mod_lua may be linked
-# against 5.1, 5.2, or 5.4 — kb.lua searches all of them for lua-md5.
-if ! sudo apt install -y lua5.1; then
-    echo "lua5.1 is not available; installing a later Lua interpreter"
-    sudo apt install -y lua5.4 || sudo apt install -y lua5.3 || sudo apt install -y lua5.2
+# mod_lua.so is in the apache2 package on Ubuntu 22-26; libapache2-mod-lua
+# does not exist on all releases (set -e would abort the installer).
+# Do not prepend lua 5.1/5.2 package.path — Apache 22.04 is Lua 5.3 and
+# 24.04+ is 5.4; loading apt lua-md5 (5.1/5.2 .so) into that VM is AH01477.
+if [[ ! -f /usr/lib/apache2/modules/mod_lua.so ]]; then
+    sudo apt install -y libapache2-mod-lua || true
 fi
-sudo apt install -y lua-md5 luarocks
+if [[ ! -f /usr/lib/apache2/modules/mod_lua.so ]]; then
+    echo "ERROR: Apache mod_lua is missing (/usr/lib/apache2/modules/mod_lua.so)" >&2
+    exit 1
+fi
 sudo a2enmod lua
-
-KB_LUA_MULTIARCH="$(dpkg-architecture -qDEB_HOST_MULTIARCH 2>/dev/null || echo x86_64-linux-gnu)"
-KB_LUA_PATH=""
-KB_LUA_CPATH=""
-for ver in 5.1 5.2 5.3 5.4; do
-    KB_LUA_PATH+="/usr/share/lua/${ver}/?.lua;/usr/share/lua/${ver}/?/init.lua;/usr/local/share/lua/${ver}/?.lua;"
-    KB_LUA_CPATH+="/usr/lib/${KB_LUA_MULTIARCH}/lua/${ver}/?.so;/usr/lib/${KB_LUA_MULTIARCH}/lua/${ver}/?/core.so;/usr/local/lib/lua/${ver}/?.so;"
-done
+sudo apt install -y lua-md5 || true
 
 rm -rf /var/log/apache2/*
 rm -rf /var/log/killbot/*
@@ -1677,16 +1674,108 @@ EOF
 
 sudo chmod +x /opt/killbot/kbEqual.php
 
-# Only the Lua package paths need shell expansion. Quote the rest so
-# comments like $(...) are not executed as command substitution.
-sudo sudo tee /opt/killbot/kb.lua > /dev/null <<KB_LUA_HEAD
-package.path = "${KB_LUA_PATH}" .. package.path
-package.cpath = "${KB_LUA_CPATH}" .. package.cpath
-KB_LUA_HEAD
+# Quoted so comments like $(...) are not executed as command substitution.
+sudo sudo tee /opt/killbot/kb.lua > /dev/null <<'KB_LUA_BODY'
 
-sudo sudo tee -a /opt/killbot/kb.lua > /dev/null <<'KB_LUA_BODY'
-
-local md5 = require "md5"
+-- apt lua-md5 is Lua 5.1/5.2 only. Apache 22.04 is 5.3, 24.04+ is 5.4.
+-- Do not require the C module (wrong ABI → AH01477). Pure Lua MD5 instead.
+local md5 = {}
+do
+    local loader = loadstring or load
+    local chunk, compile_err = loader([=[
+        return function(message)
+            local K = {
+                0xd76aa478, 0xe8c7b756, 0x242070db, 0xc1bdceee,
+                0xf57c0faf, 0x4787c62a, 0xa8304613, 0xfd469501,
+                0x698098d8, 0x8b44f7af, 0xffff5bb1, 0x895cd7be,
+                0x6b901122, 0xfd987193, 0xa679438e, 0x49b40821,
+                0xf61e2562, 0xc040b340, 0x265e5a51, 0xe9b6c7aa,
+                0xd62f105d, 0x02441453, 0xd8a1e681, 0xe7d3fbc8,
+                0x21e1cde6, 0xc33707d6, 0xf4d50d87, 0x455a14ed,
+                0xa9e3e905, 0xfcefa3f8, 0x676f02d9, 0x8d2a4c8a,
+                0xfffa3942, 0x8771f681, 0x6d9d6122, 0xfde5380c,
+                0xa4beea44, 0x4bdecfa9, 0xf6bb4b60, 0xbebfbc70,
+                0x289b7ec6, 0xeaa127fa, 0xd4ef3085, 0x04881d05,
+                0xd9d4d039, 0xe6db99e5, 0x1fa27cf8, 0xc4ac5665,
+                0xf4292244, 0x432aff97, 0xab9423a7, 0xfc93a039,
+                0x655b59c3, 0x8f0ccc92, 0xffeff47d, 0x85845dd1,
+                0x6fa87e4f, 0xfe2ce6e0, 0xa3014314, 0x4e0811a1,
+                0xf7537e82, 0xbd3af235, 0x2ad7d2bb, 0xeb86d391
+            }
+            local sft = {
+                7,12,17,22, 7,12,17,22, 7,12,17,22, 7,12,17,22,
+                5, 9,14,20, 5, 9,14,20, 5, 9,14,20, 5, 9,14,20,
+                4,11,16,23, 4,11,16,23, 4,11,16,23, 4,11,16,23,
+                6,10,15,21, 6,10,15,21, 6,10,15,21, 6,10,15,21
+            }
+            local function rotl(x, n)
+                x = x & 0xFFFFFFFF
+                return ((x << n) | (x >> (32 - n))) & 0xFFFFFFFF
+            end
+            local ml = #message * 8
+            local msg = message .. "\128"
+            while (#msg % 64) ~= 56 do
+                msg = msg .. "\0"
+            end
+            local pad = {}
+            local n = ml
+            for i = 1, 8 do
+                pad[i] = string.char(n & 0xFF)
+                n = n >> 8
+            end
+            msg = msg .. table.concat(pad)
+            local a0, b0, c0, d0 = 0x67452301, 0xefcdab89, 0x98badcfe, 0x10325476
+            for off = 1, #msg, 64 do
+                local chunk = msg:sub(off, off + 63)
+                local w = {}
+                for i = 0, 15 do
+                    local j = i * 4
+                    local b1, b2, b3, b4 = chunk:byte(j + 1, j + 4)
+                    w[i] = b1 | (b2 << 8) | (b3 << 16) | (b4 << 24)
+                end
+                local A, B, C, D = a0, b0, c0, d0
+                for i = 0, 63 do
+                    local F, g
+                    if i < 16 then
+                        F = (B & C) | (((~B) & 0xFFFFFFFF) & D)
+                        g = i
+                    elseif i < 32 then
+                        F = (D & B) | (((~D) & 0xFFFFFFFF) & C)
+                        g = (5 * i + 1) % 16
+                    elseif i < 48 then
+                        F = B ~ C ~ D
+                        g = (3 * i + 5) % 16
+                    else
+                        F = C ~ (B | ((~D) & 0xFFFFFFFF))
+                        g = (7 * i) % 16
+                    end
+                    F = (F + A + K[i + 1] + w[g]) & 0xFFFFFFFF
+                    A, D, C, B = D, C, B, (B + rotl(F, sft[i + 1])) & 0xFFFFFFFF
+                end
+                a0 = (a0 + A) & 0xFFFFFFFF
+                b0 = (b0 + B) & 0xFFFFFFFF
+                c0 = (c0 + C) & 0xFFFFFFFF
+                d0 = (d0 + D) & 0xFFFFFFFF
+            end
+            local function hex(x)
+                local t = {}
+                for _ = 1, 4 do
+                    t[#t + 1] = string.format("%02x", x & 0xFF)
+                    x = x >> 8
+                end
+                return table.concat(t)
+            end
+            return hex(a0) .. hex(b0) .. hex(c0) .. hex(d0)
+        end
+    ]=])
+    if not chunk then
+        error("killbot: cannot compile pure Lua MD5 (need Apache Lua 5.3+): " .. tostring(compile_err))
+    end
+    md5.sumhexa = chunk()
+end
+if md5.sumhexa("abc") ~= "900150983cd24fb0d6963f7d28e17f72" then
+    error("killbot: md5 self-check failed")
+end
 
 local cache = cache or {}
 local lastFlush = 0
@@ -5082,7 +5171,7 @@ if (!\$type) {
 }
 
 if (\$type=="v"){
-    echo "3.7"; 
+    echo "3.71"; 
     exit;
 }
 
