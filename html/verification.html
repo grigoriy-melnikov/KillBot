@@ -526,6 +526,10 @@ if (!isset($kb_show_free_label)) {
     $kb_show_free_label = true;
 }
 $kb_show_free_label = (bool) $kb_show_free_label;
+if (!isset($kb_display_errors)) {
+    $kb_display_errors = false;
+}
+$kb_display_errors = (bool) $kb_display_errors;
 if (!isset($kb_privacy_url) || $kb_privacy_url === '') {
     $kb_privacy_url = 'https://killbot.ru/data_privacy';
 }
@@ -855,7 +859,7 @@ kbDisplayKbErrorsTimer = setInterval(kbDisplayKbErrors, 10000);
 
 var kbID="ogRSmG5"; //for DNS only
 var kbID2="kbID2val"; 
-var kbVER="2.1";
+var kbVER="2.0";
 var kbKey="";
 var kbVerificationPage="1";
 var kbGA="";
@@ -868,7 +872,7 @@ var kbCutCounterIsBot="1";
 var kbMetrikaDisableForBots="0";  
 var kbCookieName="kbCheck";
 var kbDisableSpinner=false;
-var kbDisplayErrors=false;
+var kbDisplayErrors=<?=json_encode($kb_display_errors)?>;
 var kbYandexMetrikaInit=false;
 var kbVKPixel="";
 var kbBackupServers=[];

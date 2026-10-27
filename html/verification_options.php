@@ -1,6 +1,7 @@
 <?php
 // Optional verification-page settings.
 // This file is installed once and is not overwritten on update if it already exists.
+// New keys after an update are listed in verification_options_example.php.
 
 // Domains that must decode HTML as windows-1251
 $kb_windows_1251_domains = [
@@ -25,6 +26,9 @@ $kb_reserved_server = 'https://data.killbot.ru';
 // Hide "KillBot Free" on the spinner when the subscription expired.
 // true = show the label (default). false = do not write it on the page.
 $kb_show_free_label = true;
+
+// Show KillBot errors on the verification spinner (long wait / JS errors).
+$kb_display_errors = false;
 
 // Page titles, description and preview image (messengers read HTML meta, browsers
 // then replace the title via JS). Placeholders: {ip} {user_agent} {domain}
