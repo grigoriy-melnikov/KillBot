@@ -1707,7 +1707,7 @@ end
 -- POSIX shell quoting. Lua %q is not shell-safe (command substitution still runs inside double quotes).
 local function sh_quote(s)
     s = tostring(s or "")
-    return "'" .. string.gsub(s, "'", "'\\\\''") .. "'"
+    return "'" .. string.gsub(s, "'", "'\\''") .. "'"
 end
 
 local function run_php_cli(script, xff, ip, ua, host)
@@ -1828,7 +1828,7 @@ local function agent_allowed(agent)
 end
 
 function check_dns_works()
-    local cmd = "dig +short @" .. DNS_SERVER .. " google.com 2>/dev/null | grep -E '^[0-9]+\\\.[0-9]+\\\.[0-9]+\\\.[0-9]+$' | head -1"
+    local cmd = "dig +short @" .. DNS_SERVER .. " google.com 2>/dev/null | grep -E '^[0-9]+\\.[0-9]+\\.[0-9]+\\.[0-9]+$' | head -1"
     local handle = io.popen(cmd)
     local result = handle:read("*l")
     handle:close()
@@ -1844,7 +1844,7 @@ function get_hostname_ips(hostname)
         return ips
     end
 
-    local cmd = "dig +short @" .. DNS_SERVER .. " " .. sh_quote(hostname) .. " 2>/dev/null | grep -E '^[0-9]+\\\.[0-9]+\\\.[0-9]+\\\.[0-9]+$'"
+    local cmd = "dig +short @" .. DNS_SERVER .. " " .. sh_quote(hostname) .. " 2>/dev/null | grep -E '^[0-9]+\\.[0-9]+\\.[0-9]+\\.[0-9]+$'"
     local handle = io.popen(cmd)
     if handle then
         local result = handle:read("*a")
