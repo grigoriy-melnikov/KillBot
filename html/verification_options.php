@@ -30,6 +30,15 @@ $kb_show_free_label = true;
 // Show KillBot errors on the verification spinner (long wait / JS errors).
 $kb_display_errors = false;
 
+// VPN probe: browser HEAD-requests a URL that is often blocked without a VPN.
+// Off by default — the probe JS is not written to verification.php at all.
+$kb_check_vpn = false;
+// Used only when $kb_check_vpn is true. Empty URL disables the probe.
+// Examples:
+//   https://www.instagram.com/favicon.ico
+//   https://sci-hub.ru/favicon.ico
+$kb_vpn_check_url = 'https://www.instagram.com/favicon.ico';
+
 // Page titles, description and preview image (messengers read HTML meta, browsers
 // then replace the title via JS). Placeholders: {ip} {user_agent} {domain}
 // $kb_page_host is the current site host (HTTP_HOST), already lowercased.

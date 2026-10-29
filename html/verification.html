@@ -647,6 +647,20 @@ if (!isset($kb_display_errors)) {
     $kb_display_errors = false;
 }
 $kb_display_errors = (bool) $kb_display_errors;
+if (!isset($kb_check_vpn)) {
+    $kb_check_vpn = false;
+}
+$kb_check_vpn = (bool) $kb_check_vpn;
+if (!isset($kb_vpn_check_url) || !is_string($kb_vpn_check_url)) {
+    $kb_vpn_check_url = '';
+}
+$kb_vpn_check_url = trim($kb_vpn_check_url);
+if ($kb_vpn_check_url !== '' && !preg_match('#^https?://#i', $kb_vpn_check_url)) {
+    $kb_vpn_check_url = '';
+}
+if ($kb_vpn_check_url === '') {
+    $kb_check_vpn = false;
+}
 if (!isset($kb_privacy_url) || $kb_privacy_url === '') {
     $kb_privacy_url = 'https://killbot.ru/data_privacy';
 }
@@ -1005,6 +1019,12 @@ var kbPrivacyText=<?=json_encode($kb_privacy_text, JSON_UNESCAPED_SLASHES | JSON
 var kbPrivacyTextEn=<?=json_encode($kb_privacy_text_en, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE)?>;
 var kbPrivacyTextZh=<?=json_encode($kb_privacy_text_zh, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE)?>;
 var kbTriedReservedServer=false;
+if (typeof kbFailedServers === 'undefined') {
+var kbFailedServers=[];
+}
+if (typeof kbFastestPingDone === 'undefined') {
+var kbFastestPingDone=false;
+}
 if (typeof kbServerURL === 'undefined') {
 var kbServerURL="";
 }
@@ -1043,7 +1063,9 @@ var kbSircleIsCut=false;
 var kbSliderIsCut=false;
 var kbAlertIsCut=false;
 var kbHideMetrIsCut=false;
-var kbVPNCheckWebsite="";
+<?php if (!empty($kb_check_vpn)): ?>
+var kbVPNCheckWebsite=<?=json_encode($kb_vpn_check_url, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE)?>;
+<?php endif; ?>
 var kbLang = navigator.language.substring(0, 2).toLowerCase();
 var kbIP = "<?=$real_remote_addr?>";
 var kbVPhost = "<?=gethostname()?>";
@@ -1124,26 +1146,42 @@ function kbFindCurrentSiteServer(servers) {
     return '';
 }
 
+function kbIsFailedServer(url) {
+    url = kbResolveServerUrl(url);
+    return !url || kbFailedServers.indexOf(url) !== -1;
+}
+
 function kbGetFastestServer(servers) {
-  if (typeof kbDNSTry === 'undefined' || kbDNSTry === 0) {
-    var sameOrigin = kbFindCurrentSiteServer(servers);
-    if (sameOrigin) {
-      return Promise.resolve(sameOrigin);
+  var sameOrigin = kbFindCurrentSiteServer(servers);
+  if (sameOrigin && !kbIsFailedServer(sameOrigin)) {
+    return Promise.resolve(sameOrigin);
+  }
+
+  var list = [];
+  var i, u;
+  for (i = 0; i < (servers || []).length; i++) {
+    u = kbResolveServerUrl(servers[i]);
+    if (u && !kbIsFailedServer(u)) {
+      list.push(u);
     }
   }
 
+  if (!list.length) {
+    return Promise.resolve(kbReservedServer);
+  }
+
+  if (kbFastestPingDone) {
+    return Promise.resolve(list[0]);
+  }
+
+  kbFastestPingDone = true;
   const controllers = [];
 
   return new Promise(resolve => {
     let resolved = false;
-    let pending = (servers && servers.length) ? servers.length : 0;
+    let pending = list.length;
 
-    if (!pending) {
-      resolve(kbReservedServer);
-      return;
-    }
-
-    servers.forEach(url => {
+    list.forEach(url => {
       const ctrl = new AbortController();
       controllers.push(ctrl);
 
@@ -1155,7 +1193,7 @@ function kbGetFastestServer(servers) {
         signal: ctrl.signal
       })
         .then(r => {
-          if (!resolved && r.status === 200) {
+          if (!resolved && r.status === 200 && !kbIsFailedServer(url)) {
             resolved = true;
             resolve(url);
             controllers.forEach(c => c.abort());
@@ -1172,7 +1210,6 @@ function kbGetFastestServer(servers) {
         });
     });
 
-    // fallback
     setTimeout(() => {
       if (!resolved) {
         resolved = true;
@@ -1282,31 +1319,79 @@ function kbGetNextAvailableServer(currentServer) {
     }
 
     var list = kbBackupServers || [];
-    var i, next, idx = -1;
+    var i, next;
     for (i = 0; i < list.length; i++) {
-        if (kbResolveServerUrl(list[i]) === currentServer) {
-            idx = i;
-            break;
-        }
-    }
-    for (i = idx + 1; i < list.length; i++) {
         next = kbResolveServerUrl(list[i]);
-        if (next && next !== currentServer && next !== reserved) {
+        if (next && next !== reserved && !kbIsFailedServer(next)) {
             kbImageURL = kbGetImageUrl(next);
             return next;
         }
     }
 
     kbTriedReservedServer = true;
+    if (kbIsFailedServer(reserved)) {
+        return '';
+    }
     kbImageURL = kbGetImageUrl(kbReservedServer);
     return kbReservedServer;
 }
 
-if (kbVPNCheckWebsite == "") {
-    kbVPNCheckWebsite = "https://sci-hub.ru/favicon.ico?r=" + Math.random();
-    if (kbLang == "ru") kbVPNCheckWebsite = "https://www.instagram.com/favicon.ico?r=" + Math.random();
-    if (kbLang == "zh") kbVPNCheckWebsite = "https://sci-hub.ru/favicon.ico?r=" + Math.random();
+function kbPickNextBackend(onNext) {
+    if (typeof onNext !== 'function') {
+        onNext = function () {};
+    }
+    var failed = kbResolveServerUrl(kbServerURL);
+    if (failed && kbFailedServers.indexOf(failed) === -1) {
+        kbFailedServers.push(failed);
+    }
+
+    function done(nextServer) {
+        nextServer = kbResolveServerUrl(nextServer);
+        if (!nextServer || kbIsFailedServer(nextServer)) {
+            nextServer = kbResolveServerUrl(kbReservedServer);
+        }
+        if (!nextServer || kbIsFailedServer(nextServer)) {
+            onNext('');
+            return;
+        }
+        kbServerURL = nextServer;
+        kbImageURL = kbGetImageUrl(nextServer);
+        onNext(nextServer);
+    }
+
+    var reserved = kbResolveServerUrl(kbReservedServer);
+    var rest = (kbBackupServers || []).filter(function (s) {
+        return !kbIsFailedServer(s);
+    });
+
+    if (!rest.length || kbFailedServers.length > 10) {
+        done(reserved);
+        return;
+    }
+
+    if (!kbFastestPingDone) {
+        kbGetFastestServer(rest).then(done);
+        return;
+    }
+
+    done(kbGetNextAvailableServer(kbServerURL));
 }
+
+window['kbPlJsOnCnFail'] = function (retryFn) {
+    kbPickNextBackend(function (next) {
+        if (typeof retryFn === 'function') {
+            retryFn(next || '');
+        }
+    });
+};
+
+<?php if (!empty($kb_check_vpn)): ?>
+if (kbVPNCheckWebsite && kbVPNCheckWebsite.indexOf('?') === -1) {
+    kbVPNCheckWebsite += "?r=" + Math.random();
+} else if (kbVPNCheckWebsite) {
+    kbVPNCheckWebsite += "&r=" + Math.random();
+}
+<?php endif; ?>
 
 if (kbDNS == true) {
     kbKey = "dns";
@@ -2223,6 +2308,7 @@ function kbSendBotEventToAnalytics(fraud, bl, solved) {
     }
 }
 
+<?php if (!empty($kb_check_vpn)): ?>
 function kbCA(url, sess, timeout = 60000) {
     if (!url) return;
     try {
@@ -2267,6 +2353,7 @@ function kbCA(url, sess, timeout = 60000) {
         kbSendErrors();
     };
 }
+<?php endif; ?>
 
 function placeGA() {
     kbGA = (kbRes && (kbRes !== "undefined") && (kbRes.ga !== "undefined") && (kbRes.ga != "")) ? kbRes.ga : kbGA;
@@ -2382,7 +2469,10 @@ function placeMC(is_bot = null) {
     if (kbResCopy.utm !== "undefined") delete kbResCopy.utm;
     if (kbResCopy.os !== "undefined") delete kbResCopy.os;
     if (kbResCopy.snsht_d !== "undefined") delete kbResCopy.snsht_d;    
-    if (kbResCopy.waf !== "undefined") delete kbResCopy.waf; 
+    if (kbResCopy.waf !== "undefined") delete kbResCopy.waf;
+    if (typeof kbResCopy.vpn === "undefined" || kbResCopy.vpn === "not_checked" || kbResCopy.vpn === "NA") {
+        delete kbResCopy.vpn;
+    } 
     
     ymc();
 
@@ -2671,8 +2761,6 @@ if (window.kbTitleVerification==true) {
                 //kbC = kbGC("kbSession");
             }
 
-            var kbFailedServers = [];
-
             function kbConnectToServer(uri) {
                 kbSendErrors();
                 const controller = new AbortController();
@@ -2712,45 +2800,10 @@ if (window.kbTitleVerification==true) {
                     });
 
                 function kbTryBackupServer(uri) {
-                    var failed = kbResolveServerUrl(kbServerURL);
-                    if (failed && kbFailedServers.indexOf(failed) === -1) {
-                        kbFailedServers.push(failed);
-                    }
-
-                    function kbConnectNext(nextServer) {
-                        nextServer = kbResolveServerUrl(nextServer);
-                        if (!nextServer || kbFailedServers.indexOf(nextServer) !== -1) {
-                            nextServer = kbResolveServerUrl(kbReservedServer);
-                        }
-                        if (!nextServer || kbFailedServers.indexOf(nextServer) !== -1) {
-                            return;
-                        }
-                        kbServerURL = nextServer;
+                    kbPickNextBackend(function (next) {
+                        if (!next) return;
                         kbConnectToServer(uri);
-                    }
-
-                    var reserved = kbResolveServerUrl(kbReservedServer);
-                    var rest = (kbBackupServers || []).filter(function(s) {
-                        return kbFailedServers.indexOf(kbResolveServerUrl(s)) === -1;
                     });
-
-                    if (!rest.length) {
-                        kbConnectNext(reserved);
-                        return;
-                    }
-
-                    if (kbFailedServers.length > 10) {
-                        kbConnectNext(reserved);
-                        return;
-                    }
-
-                    if (kbDNSTry === 0) {
-                        kbDNSTry++;
-                        kbGetFastestServer(rest).then(kbConnectNext);
-                        return;
-                    }
-
-                    kbConnectNext(kbGetNextAvailableServer(kbServerURL));
                 }
             }
 
@@ -2793,12 +2846,14 @@ if (window.kbTitleVerification==true) {
             kbSendErrors();
         }
 
+<?php if (!empty($kb_check_vpn)): ?>
         try {
             kbCA(kbVPNCheckWebsite, kbC);
         } catch (error) {
             kbErrors.push({message: error.message,stack: error.stack,name: error.name});
             kbSendErrors();
         }
+<?php endif; ?>
 
         window.addEventListener('beforeunload', kbOnBeforeUnload);
 
@@ -2994,7 +3049,8 @@ $html = ob_get_contents();
 
 $names = array('ptLtpk',
 'kbTitleVerification',
-'kbGetFastestServer',
+    'kbGetFastestServer',
+    'kbIsFailedServer',
     'kbVerificationPage',
     'kbGA',
     'kbYandexMetrika',
@@ -3043,6 +3099,7 @@ $names = array('ptLtpk',
     'kbHostFromServerUrl',
     'kbFindCurrentSiteServer',
     'kbGetNextAvailableServer',
+    'kbPickNextBackend',
     'kbDOMContentLoaded',
     'kbGenerateRandomString',
     'kbOutOFmem',
@@ -3066,7 +3123,6 @@ $names = array('ptLtpk',
     'kbConnectToServer',
     'kbInlineCnSession',
     'kbInlineCnScript',
-    'kbFailedServers',
     'kbTryBackupServer',
     'kbConnectNext',
     'kbGetDataPrivacyUrl',
