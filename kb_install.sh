@@ -92,21 +92,47 @@ kb_php_candidate_version() {
     apt-cache policy "libapache2-mod-php${1}" 2>/dev/null | awk '/Candidate:/ {print $2; exit}'
 }
 
+# Ondrej publishes jammy/noble only. Interim Ubuntu (plucky, questing, …)
+# gets a source file with no Release; point it at noble instead of dropping
+# the PPA — otherwise PHP2Shell-patched packages are unavailable.
+kb_php_rewrite_ondrej_suite() {
+    local suite="${1:-noble}"
+    local f found=0
+    local nullglob_was=0
+    shopt -q nullglob && nullglob_was=1
+    shopt -s nullglob
+    for f in /etc/apt/sources.list.d/*ondrej*php* /etc/apt/sources.list.d/*ondrej-ubuntu-php*; do
+        [ -f "$f" ] || continue
+        found=1
+        sudo sed -i -E \
+            -e "s/^(Suites:[[:space:]]*).*/\\1${suite}/" \
+            -e "s#(ondrej/php/ubuntu[/]*)[[:space:]]+[A-Za-z0-9]+#\\1 ${suite}#" \
+            "$f"
+    done
+    [ "$nullglob_was" -eq 1 ] || shopt -u nullglob
+    [ "$found" -eq 1 ]
+}
+
 kb_enable_ondrej_php_ppa() {
     echo "Enabling ppa:ondrej/php for patched PHP packages..."
     sudo apt-get install -y software-properties-common ca-certificates gnupg
     sudo add-apt-repository -y universe || true
-    if sudo add-apt-repository -y ppa:ondrej/php; then
-        if sudo apt-get update -y; then
-            echo "ppa:ondrej/php is enabled."
-            return 0
-        fi
-        echo "WARNING: ppa:ondrej/php has no packages for Ubuntu ${OS_VERSION}; removing it."
-        sudo add-apt-repository -y --remove ppa:ondrej/php || true
-        sudo apt-get update -y
+    if ! sudo add-apt-repository -y ppa:ondrej/php; then
+        echo "WARNING: could not add ppa:ondrej/php; trying Ubuntu packages only."
+        sudo apt-get update -y || true
         return 1
     fi
-    echo "WARNING: could not add ppa:ondrej/php; trying Ubuntu packages only."
+    if sudo apt-get update -y; then
+        echo "ppa:ondrej/php is enabled."
+        return 0
+    fi
+    echo "WARNING: ppa:ondrej/php has no packages for Ubuntu ${OS_VERSION}; using noble."
+    if kb_php_rewrite_ondrej_suite noble && sudo apt-get update -y; then
+        echo "ppa:ondrej/php is enabled (noble packages on Ubuntu ${OS_VERSION})."
+        return 0
+    fi
+    echo "WARNING: ppa:ondrej/php noble packages failed to load; removing it."
+    sudo add-apt-repository -y --remove ppa:ondrej/php || true
     sudo apt-get update -y || true
     return 1
 }
@@ -161,7 +187,7 @@ kb_install_patched_php() {
     series="$(kb_php_pick_series || true)"
     if [[ -z "$series" ]]; then
         echo "ERROR: no patched PHP package is available (need 8.2.35+, 8.3.36+, 8.4.27+, or 8.5.12+)." >&2
-        echo "Ubuntu ${OS_VERSION} default PHP 8.1 is EOL and is not fixed. Enable ppa:ondrej/php and retry." >&2
+        echo "Ubuntu ${OS_VERSION} archive PHP is not patched. Enable ppa:ondrej/php (noble fallback on non-LTS) and retry." >&2
         php -v 2>/dev/null || true
         exit 1
     fi
@@ -343,6 +369,9 @@ sudo apt install -y socat curl zip unzip
 
 
 CURRENT_SERVER_IP=$(curl -s http://checkip.amazonaws.com)
+CURRENT_SERVER_IP="${CURRENT_SERVER_IP//$'\r'/}"
+CURRENT_SERVER_IP="${CURRENT_SERVER_IP//$'\n'/}"
+CURRENT_SERVER_IP="${CURRENT_SERVER_IP// /}"
 #echo "Current server IP: $CURRENT_SERVER_IP"
 
 #Get information about the Ubuntu version
@@ -353,6 +382,23 @@ if [ "$(id -u)" -ne 0 ]; then
     echo "This script must be run with sudo!"
     exit 1
 fi
+
+kb_current_hostname() {
+    hostname -s 2>/dev/null || hostname
+}
+
+kb_apply_hostname() {
+    local new="$1"
+    hostnamectl set-hostname "$new"
+    if [ -f /etc/hosts ]; then
+        if grep -qE '^127\.0\.1\.1[[:space:]]' /etc/hosts; then
+            sed -i -E "s/^127\\.0\\.1\\.1.*/127.0.1.1 ${new}/" /etc/hosts
+        else
+            echo "127.0.1.1 ${new}" >> /etc/hosts
+        fi
+    fi
+    echo "Hostname set to ${new}"
+}
 
 # Check that the system is a supported Ubuntu release
 if [[ "$OS_ID" == "Ubuntu" ]] && [[ "$OS_VERSION" == "22.04" || "$OS_VERSION" == "24.04" || "$OS_VERSION" == "25.04" || "$OS_VERSION" == "25.10" || "$OS_VERSION" == "26.04" ]]; then
@@ -5112,7 +5158,7 @@ if (!\$type) {
 }
 
 if (\$type=="v"){
-    echo "3.71"; 
+    echo "3.72"; 
     exit;
 }
 
@@ -5584,6 +5630,19 @@ kb_sysctl_system
 if ! kb status; then
     echo "Error: KillBot installation check failed."
     exit 1
+fi
+
+# Prompt name (hostname -s). If it has no kb-, use kb-<last IPv4 octet>.
+kb_hn="$(kb_current_hostname)"
+if [[ "$kb_hn" == *kb-* ]]; then
+    echo "Hostname '${kb_hn}' already contains kb-; leaving it."
+else
+    kb_last="${CURRENT_SERVER_IP##*.}"
+    if [[ "$kb_last" =~ ^[0-9]+$ ]]; then
+        kb_apply_hostname "kb-${kb_last}"
+    else
+        echo "WARNING: could not take last octet from IP '${CURRENT_SERVER_IP}'; hostname not changed."
+    fi
 fi
 
 echo ""

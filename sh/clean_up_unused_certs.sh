@@ -117,6 +117,8 @@ DOMAINS=$(
       if echo "$name" | grep -Eq '^000'; then
         continue
       fi
+      # solver domain vhost: 00-s1.example.com.conf -> s1.example.com
+      name="${name#00-}"
       echo "$name"
     done
     for d in /etc/letsencrypt/live/*/; do

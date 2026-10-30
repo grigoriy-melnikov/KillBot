@@ -1,6 +1,6 @@
 #!/bin/bash
 #
-# 1) /opt/killbot/killbot_revers — backend -> killbot_revers_checked
+# 1) /opt/killbot/killbot_revers — backend -> /opt/killbot/settings/killbot_revers_checked
 #
 # 2) /opt/killbot/settings/DOMAIN/killbot_revers — proxy:backend
 #    proxy (r1.DOMAIN, …) -> killbot_revers_checked
@@ -101,7 +101,8 @@ acquire_run_lock() {
 acquire_run_lock
 
 GLOBAL_BACKENDS_FILE="${GLOBAL_BACKENDS_FILE:-/opt/killbot/killbot_revers}"
-GLOBAL_CHECKED_FILE="${GLOBAL_CHECKED_FILE:-/opt/killbot/killbot_revers_checked}"
+GLOBAL_CHECKED_FILE="${GLOBAL_CHECKED_FILE:-/opt/killbot/settings/killbot_revers_checked}"
+LEGACY_GLOBAL_CHECKED_FILE="${LEGACY_GLOBAL_CHECKED_FILE:-/opt/killbot/killbot_revers_checked}"
 SETTINGS_BASE="${SETTINGS_BASE:-/opt/killbot/settings}"
 SSL_BASE_DIR="${SSL_BASE_DIR:-/opt/killbot/ssl}"
 DNSServer="${DNSServer:-8.8.8.8}"
