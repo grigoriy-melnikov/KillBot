@@ -191,11 +191,35 @@ kb_apache_use_prefork() {
 # Drop every Apache php*.load / php*.conf except php${keep_series}.
 # keep_series may be empty (disable all) so this is safe before the
 # new libapache2-mod-phpX.Y package is installed.
+# apt must not start Apache while the old .so is gone and php8.1.load
+# is still enabled (Ubuntu 22.04 postrm of libapache2-mod-php8.1).
+kb_apache_freeze_service() {
+    trap kb_apache_unfreeze_service EXIT
+    sudo tee /usr/sbin/policy-rc.d >/dev/null <<'EOF'
+#!/bin/sh
+case "$1" in
+    apache2|apache2.service) exit 101 ;;
+esac
+exit 0
+EOF
+    sudo chmod 755 /usr/sbin/policy-rc.d
+    sudo systemctl stop apache2 2>/dev/null || true
+}
+
+kb_apache_unfreeze_service() {
+    sudo rm -f /usr/sbin/policy-rc.d
+}
+
 kb_php_disable_other_apache_modules() {
     local keep_series="${1:-}"
-    local keep="" load leftover mod ng=0
+    local keep="" load leftover mod ver ng=0
     [[ -n "$keep_series" ]] && keep="php${keep_series}"
     sudo a2dismod php 2>/dev/null || true
+    for ver in 8.0 8.1 8.2 8.3 8.4 8.5 8.6; do
+        if [[ -z "$keep_series" || "$ver" != "$keep_series" ]]; then
+            sudo a2dismod "php${ver}" 2>/dev/null || true
+        fi
+    done
     shopt -q nullglob && ng=1
     shopt -s nullglob
     for load in /etc/apache2/mods-available/php*.load /etc/apache2/mods-enabled/php*.load; do
@@ -218,13 +242,28 @@ kb_php_disable_other_apache_modules() {
     [[ "$ng" -eq 1 ]] || shopt -u nullglob
 }
 
+# remove leaves /etc/apache2/mods-available/php8.1.load as a conffile;
+# later apt (lua, security2) then a2enmod php8.1 again with no .so.
 kb_php_remove_other_mod_packages() {
-    local series="$1" pkg
+    local series="$1" pkg ver
+    kb_apache_freeze_service
     for pkg in $(dpkg-query -W -f='${Package}\n' 'libapache2-mod-php*' 2>/dev/null || true); do
         if [[ "$pkg" != "libapache2-mod-php${series}" ]]; then
-            sudo apt-get remove -y "$pkg" || true
+            sudo apt-get purge -y "$pkg" || true
         fi
     done
+    for ver in 8.0 8.1 8.2 8.3 8.4 8.5 8.6; do
+        if [[ "$ver" != "$series" ]]; then
+            sudo rm -f \
+                "/etc/apache2/mods-enabled/php${ver}.load" \
+                "/etc/apache2/mods-enabled/php${ver}.conf" \
+                "/etc/apache2/mods-available/php${ver}.load" \
+                "/etc/apache2/mods-available/php${ver}.conf"
+        fi
+    done
+    sudo rm -f /etc/apache2/mods-enabled/php.load /etc/apache2/mods-enabled/php.conf
+    kb_php_disable_other_apache_modules "$series"
+    kb_apache_unfreeze_service
 }
 
 # Enable exactly one Apache mod_php. apt remove of libapache2-mod-php8.1
@@ -271,6 +310,10 @@ kb_apache_configtest() {
 }
 
 kb_apache_restart() {
+    kb_apache_unfreeze_service
+    if [[ -n "${KB_PHP_SERIES:-}" ]]; then
+        kb_php_enable_apache_module "$KB_PHP_SERIES"
+    fi
     kb_apache_configtest
     if ! sudo systemctl restart apache2; then
         echo "ERROR: apache2 failed to start." >&2
@@ -343,10 +386,12 @@ kb_install_patched_php() {
 
     kb_apache_use_prefork
     kb_php_disable_other_apache_modules "$series"
+    kb_apache_freeze_service
 
     sudo apt-get install -y "php${series}" "php${series}-cli" "libapache2-mod-php${series}"
     kb_php_use_cli "$series"
     kb_php_install_extensions "$series"
+    kb_apache_unfreeze_service
     kb_php_enable_apache_module "$series"
     kb_php_remove_other_mod_packages "$series"
     kb_php_enable_apache_module "$series"
@@ -5285,7 +5330,7 @@ if (!\$type) {
 }
 
 if (\$type=="v"){
-    echo "3.73"; 
+    echo "3.74"; 
     exit;
 }
 
