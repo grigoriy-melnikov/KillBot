@@ -69,7 +69,8 @@ kb_sysctl_system() {
 KB_PHP_SERIES=""
 
 kb_php_release() {
-    php -r 'echo PHP_MAJOR_VERSION.".".PHP_MINOR_VERSION.".".PHP_RELEASE_VERSION;' 2>/dev/null || true
+    local bin="${1:-php}"
+    "$bin" -r 'echo PHP_MAJOR_VERSION.".".PHP_MINOR_VERSION.".".PHP_RELEASE_VERSION;' 2>/dev/null || true
 }
 
 kb_php_is_patched() {
@@ -165,23 +166,169 @@ kb_php_pick_series() {
     return 1
 }
 
+kb_php_load_so() {
+    local load="/etc/apache2/mods-available/php${1}.load"
+    [[ -f "$load" ]] || return 1
+    awk '/^[[:space:]]*LoadModule[[:space:]]/ {print $3; exit}' "$load" | tr -d '"'
+}
+
+kb_php_apache_module_ready() {
+    local series="$1" so_path
+    [[ -n "$series" && -f "/etc/apache2/mods-available/php${series}.load" ]] || return 1
+    so_path="$(kb_php_load_so "$series")"
+    [[ -n "$so_path" && -f "$so_path" ]]
+}
+
+kb_apache_use_prefork() {
+    sudo a2dismod mpm_event 2>/dev/null || true
+    sudo a2dismod mpm_worker 2>/dev/null || true
+    if ! sudo a2enmod mpm_prefork; then
+        echo "ERROR: could not enable Apache mpm_prefork (required for mod_php)" >&2
+        exit 1
+    fi
+}
+
+# Drop every Apache php*.load / php*.conf except php${keep_series}.
+# keep_series may be empty (disable all) so this is safe before the
+# new libapache2-mod-phpX.Y package is installed.
+kb_php_disable_other_apache_modules() {
+    local keep_series="${1:-}"
+    local keep="" load leftover mod ng=0
+    [[ -n "$keep_series" ]] && keep="php${keep_series}"
+    sudo a2dismod php 2>/dev/null || true
+    shopt -q nullglob && ng=1
+    shopt -s nullglob
+    for load in /etc/apache2/mods-available/php*.load /etc/apache2/mods-enabled/php*.load; do
+        [[ -e "$load" || -L "$load" ]] || continue
+        mod="$(basename "$load" .load)"
+        if [[ -z "$keep" || "$mod" != "$keep" ]]; then
+            sudo a2dismod "$mod" 2>/dev/null || true
+        fi
+    done
+    for leftover in /etc/apache2/mods-enabled/php*.load /etc/apache2/mods-enabled/php*.conf; do
+        [[ -e "$leftover" || -L "$leftover" ]] || continue
+        mod="$(basename "$leftover")"
+        mod="${mod%.load}"
+        mod="${mod%.conf}"
+        if [[ -z "$keep" || "$mod" != "$keep" ]]; then
+            echo "Removing leftover Apache PHP module link: $leftover"
+            sudo rm -f "$leftover"
+        fi
+    done
+    [[ "$ng" -eq 1 ]] || shopt -u nullglob
+}
+
+kb_php_remove_other_mod_packages() {
+    local series="$1" pkg
+    for pkg in $(dpkg-query -W -f='${Package}\n' 'libapache2-mod-php*' 2>/dev/null || true); do
+        if [[ "$pkg" != "libapache2-mod-php${series}" ]]; then
+            sudo apt-get remove -y "$pkg" || true
+        fi
+    done
+}
+
+# Enable exactly one Apache mod_php. apt remove of libapache2-mod-php8.1
+# deletes libphp8.1.so but often leaves mods-enabled/php8.1.load.
+kb_php_enable_apache_module() {
+    local series="$1"
+    local so_path enabled load ng=0
+    if [[ -z "$series" ]]; then
+        echo "ERROR: kb_php_enable_apache_module: empty PHP series" >&2
+        exit 1
+    fi
+    if ! kb_php_apache_module_ready "$series"; then
+        echo "ERROR: Apache module php${series} is missing (.load or .so). Install libapache2-mod-php${series}." >&2
+        exit 1
+    fi
+
+    kb_apache_use_prefork
+    kb_php_disable_other_apache_modules "$series"
+
+    so_path="$(kb_php_load_so "$series")"
+    sudo a2enmod "php${series}"
+
+    enabled=0
+    shopt -q nullglob && ng=1
+    shopt -s nullglob
+    for load in /etc/apache2/mods-enabled/php*.load; do
+        enabled=$((enabled + 1))
+    done
+    [[ "$ng" -eq 1 ]] || shopt -u nullglob
+    if [[ "$enabled" -ne 1 ]] || [[ ! -e "/etc/apache2/mods-enabled/php${series}.load" ]]; then
+        echo "ERROR: expected only mods-enabled/php${series}.load, found:" >&2
+        ls -l /etc/apache2/mods-enabled/php* 2>/dev/null || true
+        exit 1
+    fi
+    echo "Enabled Apache module: php${series} only (${so_path})"
+}
+
+kb_apache_configtest() {
+    if ! sudo apache2ctl -t; then
+        echo "ERROR: apache2ctl -t failed. Enabled PHP modules:" >&2
+        ls -l /etc/apache2/mods-enabled/php* 2>/dev/null || true
+        exit 1
+    fi
+}
+
+kb_apache_restart() {
+    kb_apache_configtest
+    if ! sudo systemctl restart apache2; then
+        echo "ERROR: apache2 failed to start." >&2
+        sudo apache2ctl -t || true
+        ls -l /etc/apache2/mods-enabled/php* 2>/dev/null || true
+        sudo systemctl status apache2 --no-pager || true
+        exit 1
+    fi
+}
+
+kb_php_install_extensions() {
+    local series="$1"
+    local pkg
+    for pkg in \
+        "php${series}-mbstring" \
+        "php${series}-xml" \
+        "php${series}-mysql" \
+        "php${series}-zip" \
+        "php${series}-gd" \
+        "php${series}-curl"
+    do
+        sudo apt-get install -y "$pkg"
+    done
+    sudo apt-get install -y "php${series}-json" 2>/dev/null || true
+    if [ -x /usr/sbin/phpenmod ]; then
+        sudo phpenmod -v "$series" mbstring xml mysqli pdo_mysql zip gd curl 2>/dev/null || true
+    fi
+}
+
+kb_php_use_cli() {
+    local series="$1"
+    if [[ -x "/usr/bin/php${series}" ]]; then
+        sudo update-alternatives --install /usr/bin/php php "/usr/bin/php${series}" 83 >/dev/null 2>&1 || true
+        sudo update-alternatives --set php "/usr/bin/php${series}" || true
+    fi
+}
+
 kb_install_patched_php() {
     local series cand php_ver pkg
     php_ver="$(kb_php_release)"
+    # Ubuntu 22.04 with patched 8.3 already: only switch Apache to that
+    # series. If CLI is 8.3 but libapache2-mod-php8.3 was removed, install it.
     if kb_php_is_patched "$php_ver"; then
         series="$(php -r 'echo PHP_MAJOR_VERSION.".".PHP_MINOR_VERSION;' 2>/dev/null || true)"
-        KB_PHP_SERIES="$series"
-        echo "PHP ${php_ver} is already patched for PHP2Shell (CVE-2026-109618 / CVE-2026-109619). Skipping PHP repo and reinstall."
-        if [[ -n "$series" && -f "/etc/apache2/mods-available/php${series}.load" ]]; then
-            sudo a2dismod mpm_event 2>/dev/null || true
-            sudo a2dismod mpm_worker 2>/dev/null || true
-            sudo a2enmod mpm_prefork
-            sudo a2enmod "php${series}" 2>/dev/null || true
+        if [[ -n "$series" ]] && kb_php_apache_module_ready "$series"; then
+            KB_PHP_SERIES="$series"
+            echo "PHP ${php_ver} is already patched for PHP2Shell (CVE-2026-109618 / CVE-2026-109619). Skipping PHP repo and reinstall."
+            kb_php_enable_apache_module "$series"
+            kb_php_remove_other_mod_packages "$series"
+            kb_php_enable_apache_module "$series"
+            kb_apache_configtest
+            return 0
         fi
-        return 0
+        echo "PHP ${php_ver} is patched but Apache module php${series:-?} is missing. Installing matching libapache2-mod-php..."
+    else
+        echo "PHP ${php_ver:-not installed} is vulnerable or missing. Installing patched PHP (PHP2Shell CVE-2026-109618 / CVE-2026-109619)..."
     fi
 
-    echo "PHP ${php_ver:-not installed} is vulnerable or missing. Installing patched PHP (PHP2Shell CVE-2026-109618 / CVE-2026-109619)..."
     kb_enable_ondrej_php_ppa || true
 
     series="$(kb_php_pick_series || true)"
@@ -194,33 +341,21 @@ kb_install_patched_php() {
     cand="$(kb_php_candidate_version "$series")"
     echo "Installing PHP ${series} (candidate ${cand}) with Apache mpm_prefork + libapache2-mod-php${series}..."
 
-    sudo a2dismod mpm_event 2>/dev/null || true
-    sudo a2dismod mpm_worker 2>/dev/null || true
-    sudo a2enmod mpm_prefork
+    kb_apache_use_prefork
+    kb_php_disable_other_apache_modules "$series"
 
     sudo apt-get install -y "php${series}" "php${series}-cli" "libapache2-mod-php${series}"
-
-    if [[ -x "/usr/bin/php${series}" ]]; then
-        sudo update-alternatives --install /usr/bin/php php "/usr/bin/php${series}" 83 >/dev/null 2>&1 || true
-        sudo update-alternatives --set php "/usr/bin/php${series}" || true
-    fi
-
-    for load in /etc/apache2/mods-available/php*.load; do
-        [[ -f "$load" ]] || continue
-        pkg="$(basename "$load" .load)"
-        if [[ "$pkg" != "php${series}" ]]; then
-            sudo a2dismod "$pkg" 2>/dev/null || true
-        fi
-    done
-    sudo a2enmod "php${series}"
-
-    for pkg in $(dpkg-query -W -f='${Package}\n' 'libapache2-mod-php*' 2>/dev/null || true); do
-        if [[ "$pkg" != "libapache2-mod-php${series}" ]]; then
-            sudo apt-get remove -y "$pkg" || true
-        fi
-    done
+    kb_php_use_cli "$series"
+    kb_php_install_extensions "$series"
+    kb_php_enable_apache_module "$series"
+    kb_php_remove_other_mod_packages "$series"
+    kb_php_enable_apache_module "$series"
 
     php_ver="$(kb_php_release)"
+    if ! kb_php_is_patched "$php_ver" && [[ -x "/usr/bin/php${series}" ]]; then
+        php_ver="$(kb_php_release "/usr/bin/php${series}")"
+        kb_php_use_cli "$series"
+    fi
     echo "PHP CLI: $(php -v 2>/dev/null | head -n 1)"
     if ! kb_php_is_patched "$php_ver"; then
         echo "ERROR: PHP ${php_ver:-not installed} is still vulnerable to PHP2Shell." >&2
@@ -229,7 +364,7 @@ kb_install_patched_php() {
     fi
     KB_PHP_SERIES="$series"
     echo "PHP ${php_ver} is patched. Apache module: php${series}"
-    sudo systemctl restart apache2 || true
+    kb_apache_restart
 }
 
 # Distro nginx on Ubuntu 22.04 is 1.18 (critical CVEs). Official stable is 1.30.x
@@ -641,11 +776,11 @@ EOF
 chmod 644 "$ERROR_PAGES_INC"
 echo "✅ Created ${ERROR_PAGES_INC}"
 
-add_if_missing 'limit_req zone=per_host' 'limit_req zone=per_host burst=200 nodelay;'
+add_if_missing 'limit_req zone=per_host' 'limit_req zone=per_host burst=150 nodelay;'
 add_if_missing 'limit_req_zone "\$host"' 'limit_req_zone "\$host" zone=per_host:40m rate=500r/s;'
 
 add_if_missing 'limit_req zone=per_url' 'limit_req zone=per_url burst=50 nodelay;'
-add_if_missing 'limit_req_zone "\$host\$uri"' 'limit_req_zone "\$host\$uri" zone=per_url:10m rate=150r/m;'
+add_if_missing 'limit_req_zone "\$host\$uri"' 'limit_req_zone "\$host\$uri" zone=per_url:10m rate=200r/m;'
 
 
 
@@ -912,7 +1047,7 @@ fi
 if ! grep -qE '^[[:space:]]*ListenBacklog[[:space:]]' "$CONFIG_FILE"; then
     echo "ListenBacklog 4096" | sudo tee -a "$CONFIG_FILE"
 fi
-sudo systemctl restart apache2
+kb_apache_restart
 
 sudo sudo tee /etc/nginx/sites-available/$CURRENT_SERVER_IP.conf > /dev/null <<EOF
 server {
@@ -1257,9 +1392,6 @@ sudo chmod -R 755 /var/log/apache2/
 #####################
 # Patched PHP (libapache2-mod-php) + mpm_prefork. No php-fpm / mpm_event.
 echo "Configuring Apache mpm_prefork with patched mod_php..."
-sudo a2dismod mpm_event 2>/dev/null || true
-sudo a2dismod mpm_worker 2>/dev/null || true
-sudo a2enmod mpm_prefork
 sudo a2dismod proxy_fcgi 2>/dev/null || true
 for fpm_conf in /etc/apache2/conf-enabled/php*-fpm.conf; do
     [[ -e "$fpm_conf" ]] || continue
@@ -1269,13 +1401,8 @@ if [[ -z "${KB_PHP_SERIES:-}" ]]; then
     echo "ERROR: patched PHP series was not selected" >&2
     exit 1
 fi
-PHP_MOD="php${KB_PHP_SERIES}"
-if [[ ! -f "/etc/apache2/mods-available/${PHP_MOD}.load" ]]; then
-    echo "ERROR: Apache module ${PHP_MOD}.load is missing" >&2
-    exit 1
-fi
-sudo a2enmod "$PHP_MOD"
-echo "Enabled Apache module: $PHP_MOD (mpm_prefork)"
+kb_php_enable_apache_module "$KB_PHP_SERIES"
+echo "Enabled Apache module: php${KB_PHP_SERIES} (mpm_prefork, only this series)"
 #####################
 
 # lua-md5 from apt is under 5.1/5.2. Search 5.1-5.4 so require "md5" finds it
@@ -1298,7 +1425,7 @@ rm -rf /var/log/apache2/*
 rm -rf /var/log/killbot/*
 
 
-sudo systemctl restart apache2
+kb_apache_restart
 
 echo "Apache + PHP is installed."
 
@@ -5158,7 +5285,7 @@ if (!\$type) {
 }
 
 if (\$type=="v"){
-    echo "3.72"; 
+    echo "3.73"; 
     exit;
 }
 
@@ -5477,7 +5604,11 @@ else
 fi
 
 
-# Restart Apache to apply changes
+# Restart Apache to apply changes (one PHP module only)
+if [[ -n "${KB_PHP_SERIES:-}" ]]; then
+    kb_php_enable_apache_module "$KB_PHP_SERIES"
+fi
+kb_apache_configtest
 sudo systemctl stop apache2
 sudo systemctl start apache2
 sudo systemctl stop nginx 
