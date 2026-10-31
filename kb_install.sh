@@ -351,6 +351,24 @@ kb_php_use_cli() {
     fi
 }
 
+# Ondrej 8.3+ ships OPcache JIT. Ubuntu 8.1 did not. With mpm_prefork
+# MaxRequestWorkers in the thousands, JIT compile of BF.php burns every core
+# until the user a2enmod php8.1 again. Keep OPcache, turn JIT off.
+kb_php_disable_jit() {
+    local series="$1" sapi
+    [[ -n "$series" ]] || return 0
+    for sapi in apache2 cli; do
+        sudo mkdir -p "/etc/php/${series}/${sapi}/conf.d"
+        sudo tee "/etc/php/${series}/${sapi}/conf.d/99-killbot-no-jit.ini" >/dev/null <<'EOF'
+; KillBot: disable JIT only. OPcache stays on.
+opcache.enable=1
+opcache.jit=disable
+opcache.jit_buffer_size=0
+EOF
+    done
+    echo "PHP ${series} JIT disabled (opcache stays on)."
+}
+
 kb_install_patched_php() {
     local series cand php_ver pkg
     php_ver="$(kb_php_release)"
@@ -361,6 +379,7 @@ kb_install_patched_php() {
         if [[ -n "$series" ]] && kb_php_apache_module_ready "$series"; then
             KB_PHP_SERIES="$series"
             echo "PHP ${php_ver} is already patched for PHP2Shell (CVE-2026-109618 / CVE-2026-109619). Skipping PHP repo and reinstall."
+            kb_php_disable_jit "$series"
             kb_php_enable_apache_module "$series"
             kb_php_remove_other_mod_packages "$series"
             kb_php_enable_apache_module "$series"
@@ -391,6 +410,7 @@ kb_install_patched_php() {
     sudo apt-get install -y "php${series}" "php${series}-cli" "libapache2-mod-php${series}"
     kb_php_use_cli "$series"
     kb_php_install_extensions "$series"
+    kb_php_disable_jit "$series"
     kb_apache_unfreeze_service
     kb_php_enable_apache_module "$series"
     kb_php_remove_other_mod_packages "$series"
@@ -5330,7 +5350,7 @@ if (!\$type) {
 }
 
 if (\$type=="v"){
-    echo "3.74"; 
+    echo "3.75"; 
     exit;
 }
 
